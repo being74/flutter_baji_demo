@@ -76,6 +76,7 @@ private enum VideoFrames {
     let asset = AVURLAsset(url: URL(fileURLWithPath: path))
     let durationMs = Int64(max(0, CMTimeGetSeconds(asset.duration)) * 1000)
     let generator = makeGenerator(asset: asset)
+    generator.maximumSize = CGSize(width: maxSize, height: maxSize)
     let time = CMTime(seconds: 0, preferredTimescale: 600)
     var result: [String: Any] = ["durationMs": durationMs]
     if let image = try? generator.copyCGImage(at: time, actualTime: nil),
@@ -99,6 +100,9 @@ private enum VideoFrames {
       ? min(maxFrames, max(1, Int(effective) / max(1, intervalMs)))
       : 1
     let generator = makeGenerator(asset: asset)
+    if let maximumSize = coverSize(asset: asset, size: size) {
+      generator.maximumSize = maximumSize
+    }
     var output: [FlutterStandardTypedData] = []
     output.reserveCapacity(count)
     for index in 0 ..< count {
@@ -118,6 +122,38 @@ private enum VideoFrames {
     return generator
   }
 
+  /// 视频按旋转后的显示方向计算尺寸。
+  private static func displaySize(_ asset: AVAsset) -> CGSize? {
+    guard let track = asset.tracks(withMediaType: .video).first else { return nil }
+    let transformed = track.naturalSize.applying(track.preferredTransform)
+    let width = abs(transformed.width)
+    let height = abs(transformed.height)
+    guard width >= 1, height >= 1 else { return nil }
+    return CGSize(width: width, height: height)
+  }
+
+  /// 抽帧解码上限：保持宽高比、短边压到 [size]。
+  /// 源短边已不大于 [size] 时返回 nil，交给后续裁切放大。
+  private static func coverSize(asset: AVAsset, size: Int) -> CGSize? {
+    guard let display = displaySize(asset) else { return nil }
+    let shortSide = min(display.width, display.height)
+    let target = CGFloat(size)
+    guard shortSide > target else { return nil }
+    let scale = target / shortSide
+    return CGSize(
+      width: max(target, (display.width * scale).rounded(.up)),
+      height: max(target, (display.height * scale).rounded(.up))
+    )
+  }
+
+  /// JPEG 输出按 1x 像素渲染，避免 Retina 屏幕把 368pt 放大成 1104px。
+  private static func makeRenderer(_ size: CGSize) -> UIGraphicsImageRenderer {
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+    return UIGraphicsImageRenderer(size: size, format: format)
+  }
+
   private static func squareJpeg(_ image: CGImage, size: Int) -> Data? {
     let side = min(image.width, image.height)
     guard side > 0 else { return nil }
@@ -129,7 +165,7 @@ private enum VideoFrames {
     )
     guard let cropped = image.cropping(to: rect) else { return nil }
     let target = max(1, size)
-    let renderer = UIGraphicsImageRenderer(size: CGSize(width: target, height: target))
+    let renderer = makeRenderer(CGSize(width: target, height: target))
     let output = renderer.image { _ in
       UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: 0, width: target, height: target))
     }
@@ -144,7 +180,7 @@ private enum VideoFrames {
       width: max(1, Int(Double(width) * scale)),
       height: max(1, Int(Double(height) * scale))
     )
-    let renderer = UIGraphicsImageRenderer(size: target)
+    let renderer = makeRenderer(target)
     let output = renderer.image { _ in
       UIImage(cgImage: image).draw(in: CGRect(origin: .zero, size: target))
     }

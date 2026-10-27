@@ -2,12 +2,14 @@ package com.example.flutter_baji_demo
 
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * 视频抽帧 / 预览的原生实现。
@@ -69,7 +71,14 @@ class MainActivity : FlutterActivity() {
             val durationMs = retriever
                 .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 0L
-            val frame = retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            val frame = decodeFrame(
+                retriever,
+                timeUs = 0L,
+                option = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                target = videoSize(retriever)?.let { (width, height) ->
+                    decodeTarget(width, height, maxSize, cover = false)
+                },
+            )
             val preview = frame?.let { scalePreview(it, maxSize) }
             return mapOf("durationMs" to durationMs, "preview" to preview)
         } finally {
@@ -97,10 +106,15 @@ class MainActivity : FlutterActivity() {
                 1
             }
             val output = ArrayList<ByteArray>(count)
+            val target = videoSize(retriever)?.let { (width, height) ->
+                decodeTarget(width, height, size, cover = true)
+            }
             for (index in 0 until count) {
-                val frame = retriever.getFrameAtTime(
-                    index.toLong() * intervalMs * 1_000L,
-                    MediaMetadataRetriever.OPTION_CLOSEST,
+                val frame = decodeFrame(
+                    retriever,
+                    timeUs = index.toLong() * intervalMs * 1_000L,
+                    option = MediaMetadataRetriever.OPTION_CLOSEST,
+                    target = target,
                 ) ?: continue
                 val jpeg = squareJpeg(frame, size)
                 if (jpeg != null) output += jpeg
@@ -110,6 +124,54 @@ class MainActivity : FlutterActivity() {
         } finally {
             retriever.release()
         }
+    }
+
+    /** 视频存储宽高；容器缺失该元数据时返回 null。 */
+    private fun videoSize(retriever: MediaMetadataRetriever): Pair<Int, Int>? {
+        val width = retriever
+            .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            ?.toIntOrNull() ?: return null
+        val height = retriever
+            .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            ?.toIntOrNull() ?: return null
+        return if (width > 0 && height > 0) width to height else null
+    }
+
+    /**
+     * 计算保持宽高比的解码目标尺寸，避免先解出全尺寸帧再缩放。
+     *
+     * [cover] 为 true 时短边压到 [size]（抽帧后还要居中裁方），
+     * 为 false 时长边压到 [size]（预览）。源尺寸已不大于目标时返回 null。
+     */
+    private fun decodeTarget(
+        width: Int,
+        height: Int,
+        size: Int,
+        cover: Boolean,
+    ): Pair<Int, Int>? {
+        val longSide = max(width, height)
+        val shortSide = min(width, height)
+        if (cover) {
+            if (shortSide <= size) return null
+            val longTarget = (size.toLong() * longSide + shortSide - 1) / shortSide
+            return if (width >= height) longTarget.toInt() to size else size to longTarget.toInt()
+        }
+        if (longSide <= size) return null
+        val scale = size.toDouble() / longSide
+        return max(1, (width * scale).roundToInt()) to max(1, (height * scale).roundToInt())
+    }
+
+    private fun decodeFrame(
+        retriever: MediaMetadataRetriever,
+        timeUs: Long,
+        option: Int,
+        target: Pair<Int, Int>?,
+    ): Bitmap? {
+        if (target != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            val scaled = retriever.getScaledFrameAtTime(timeUs, option, target.first, target.second)
+            if (scaled != null) return scaled
+        }
+        return retriever.getFrameAtTime(timeUs, option)
     }
 
     private fun scalePreview(source: Bitmap, maxSize: Int): ByteArray? {

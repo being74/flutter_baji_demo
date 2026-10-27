@@ -9,7 +9,7 @@ class VideoInfo {
 }
 
 /// 视频抽帧由 Android MediaMetadataRetriever / iOS AVAssetImageGenerator 完成，
-/// 帧统一输出为 368×368 JPEG。
+/// 解码阶段即按目标尺寸降采样，[extract] 帧统一输出为 size×size JPEG。
 abstract final class VideoFrames {
   static const MethodChannel _channel = MethodChannel('baji/video');
 
