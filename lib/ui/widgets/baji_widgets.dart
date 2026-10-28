@@ -89,7 +89,7 @@ class FilledPill extends StatelessWidget {
         : (disabledContainerColor ?? scheme.surfaceContainerHighest);
     final foreground = enabled
         ? (contentColor ?? scheme.onSecondary)
-        : (disabledContentColor ?? scheme.onSurfaceVariant.withValues(alpha: 0.55));
+        : (disabledContentColor ?? scheme.onSurfaceVariant.withOpacity(0.55));
     final child = Material(
       color: background,
       shape: const StadiumBorder(),
@@ -135,9 +135,9 @@ class OutlinePill extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final foreground = enabled
         ? (contentColor ?? scheme.onSurface)
-        : scheme.onSurfaceVariant.withValues(alpha: 0.5);
+        : scheme.onSurfaceVariant.withOpacity(0.5);
     final border = (borderColor ?? scheme.outline)
-        .withValues(alpha: enabled ? 1 : 0.35);
+        .withOpacity(enabled ? 1 : 0.35);
     final child = Material(
       color: Colors.transparent,
       shape: StadiumBorder(side: BorderSide(color: border)),
@@ -210,7 +210,7 @@ class BinUploadButton extends StatelessWidget {
                   height: 6,
                   child: LinearProgressIndicator(
                     value: progress?.clamp(0.0, 1.0),
-                    backgroundColor: scheme.onSurfaceVariant.withValues(alpha: 0.2),
+                    backgroundColor: scheme.onSurfaceVariant.withOpacity(0.2),
                     valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
                   ),
                 ),
@@ -587,7 +587,7 @@ class TransferProgressCard extends StatelessWidget {
     final statusColor = failed
         ? vermilion
         : cancelled
-            ? chalk.withValues(alpha: 0.7)
+            ? chalk.withOpacity(0.7)
             : butter;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
@@ -624,7 +624,7 @@ class TransferProgressCard extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: transfer.fraction,
                   minHeight: 4,
-                  backgroundColor: chalk.withValues(alpha: 0.2),
+                  backgroundColor: chalk.withOpacity(0.2),
                   valueColor: const AlwaysStoppedAnimation<Color>(butter),
                 ),
               ),
@@ -634,7 +634,7 @@ class TransferProgressCard extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
-                    ?.copyWith(color: chalk.withValues(alpha: 0.7)),
+                    ?.copyWith(color: chalk.withOpacity(0.7)),
               ),
               Text(
                 '${formatBytes(transfer.sentBytes)} / ${formatBytes(transfer.totalBytes)}'
@@ -642,21 +642,21 @@ class TransferProgressCard extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
-                    ?.copyWith(color: chalk.withValues(alpha: 0.7)),
+                    ?.copyWith(color: chalk.withOpacity(0.7)),
               ),
               const SizedBox(height: 10),
               OutlinePill(
                 text: '取消',
                 onClick: onCancel,
                 contentColor: chalk,
-                borderColor: chalk.withValues(alpha: 0.5),
+                borderColor: chalk.withOpacity(0.5),
               ),
             ] else ...[
               const SizedBox(height: 6),
               Text(
                 transfer.message ?? '',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: failed ? vermilion : chalk.withValues(alpha: 0.7),
+                      color: failed ? vermilion : chalk.withOpacity(0.7),
                     ),
               ),
             ],

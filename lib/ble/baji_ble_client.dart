@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_blue_plus_ohos/flutter_blue_plus_ohos.dart';
 
 import '../core/baji_log.dart';
+import '../core/platform.dart';
 import '../protocol/baji_protocol.dart';
 
 sealed class BleConnectionState {
@@ -155,7 +156,6 @@ class BajiBleClient {
     _device = device;
 
     await device.connect(
-      license: License.nonprofit,
       timeout: _connectTimeout,
       mtu: null,
       autoConnect: false,
@@ -177,7 +177,7 @@ class BajiBleClient {
     _readChar = read;
 
     _mtu = device.mtuNow;
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || isOhos) {
       if (_mtu <= _defaultMtu) {
         try {
           _mtu = await device.requestMtu(_requestedMtu, timeout: 3);

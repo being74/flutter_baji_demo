@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "flutter_baji_demo"
+    },
+    {
+      "name": "bluetooth_permission_reason",
+      "value": "用于搜索并连接附近的电子吧唧设备进行素材传输"
+    }
+  ]
+}

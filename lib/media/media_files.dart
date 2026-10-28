@@ -27,10 +27,11 @@ abstract final class MediaFiles {
   static final ImagePicker _imagePicker = ImagePicker();
 
   static Future<PickedMedia?> pickGif() async {
-    final file = await FilePicker.pickFile(
+    final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['gif'],
     );
+    final file = result?.files.single;
     if (file == null) return null;
     final path = file.path;
     if (path == null) throw StateError('无法读取 GIF 路径');
@@ -40,10 +41,11 @@ abstract final class MediaFiles {
   }
 
   static Future<PickedMedia?> pickVideo() async {
-    final file = await FilePicker.pickFile(
+    final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['mp4', 'mov', 'webm', 'mkv', 'avi', '3gp', 'm4v'],
     );
+    final file = result?.files.single;
     if (file == null) return null;
     final path = file.path;
     if (path == null) throw StateError('无法读取视频路径');

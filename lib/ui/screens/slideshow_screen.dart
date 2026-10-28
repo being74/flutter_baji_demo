@@ -449,7 +449,7 @@ class _SlideThumb extends StatelessWidget {
                     width: 20,
                     height: 20,
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
+                      color: Colors.black.withOpacity(0.6),
                       shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,

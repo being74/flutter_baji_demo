@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../ble/baji_ble_client.dart';
 import '../ble/baji_scanner.dart';
 import '../core/baji_log.dart';
+import '../core/platform.dart';
 import '../protocol/baji_protocol.dart';
 import '../protocol/command_codec.dart';
 import '../protocol/device_message.dart';
@@ -147,7 +148,9 @@ class BajiRepository {
       '会话',
       '断开事件：${event.cause}（status=${event.status}，local=${event.localInitiated}）',
     );
-    final eligibleStatus = Platform.isIOS || _autoReconnectStatuses.contains(event.status);
+    // iOS/ohos 的断开码不沿用 Android HCI 语义，断开即尝试重连。
+    final eligibleStatus =
+        Platform.isIOS || isOhos || _autoReconnectStatuses.contains(event.status);
     if (BajiConfig.autoReconnect &&
         _autoReconnectEnabled &&
         !ble.isConnected &&
