@@ -31,6 +31,7 @@ class BajiValidationException implements Exception {
 class BajiRepository {
   BajiRepository() {
     _transferManager = BajiTransferManager(
+      failureProbe: () => _deviceFailure,
       sender: ({
         required type,
         required payload,
@@ -75,6 +76,12 @@ class BajiRepository {
   StreamSubscription<List<BajiDevice>>? _watchScanSubscription;
   Completer<String?>? _watchScanCompleter;
   bool _closed = false;
+
+  /// 设备主动报错（`GetPacketFail`）的原因；非空时立即终止正在进行的传输。
+  String? _deviceFailure;
+
+  /// 是否有文件传输正在进行，用于给掉线日志补上下文。
+  bool _transferring = false;
 
   static const Duration _handshakeDelay = Duration(milliseconds: 200);
   static const Duration _responseDelay = Duration(milliseconds: 150);
@@ -148,6 +155,13 @@ class BajiRepository {
       '会话',
       '断开事件：${event.cause}（status=${event.status}，local=${event.localInitiated}）',
     );
+    if (_transferring) {
+      // 加密链路上设备写 flash 时会超时，控制器最终以 MIC failure 拆链。
+      BajiLog.instance.warn(
+        '会话',
+        '传输过程中掉线：若反复出现，请到系统蓝牙设置里取消该设备的配对后重试',
+      );
+    }
     // iOS/ohos 的断开码不沿用 Android HCI 语义，断开即尝试重连。
     final eligibleStatus =
         Platform.isIOS || isOhos || _autoReconnectStatuses.contains(event.status);
@@ -210,8 +224,7 @@ class BajiRepository {
     }
   }
 
-  /// 盲重连只适合设备快速恢复；设备退出 BLE 后通常不再广播，
-  /// 这里改为扫描等待目标地址/名称重新出现，发现广播后再连接。
+  /// 扫描等待设备重新广播后再连接。
   Future<void> _watchForDevice(String address, int generation) async {
     if (_scanReconnectTask != null) return;
     _scanReconnectTask = _watchForDeviceInternal(address, generation)
@@ -358,14 +371,18 @@ class BajiRepository {
     TransferOptions options = const TransferOptions(),
     void Function(TransferProgress progress)? onProgress,
     bool Function()? isCancelled,
-  }) =>
-      _transferManager.transfer(
-        kind: kind,
-        files: files,
-        options: options,
-        onProgress: onProgress,
-        isCancelled: isCancelled,
-      );
+  }) {
+    // 每次传输重新收集设备反馈，避免上一次的失败标记带进来。
+    _deviceFailure = null;
+    _transferring = true;
+    return _transferManager.transfer(
+      kind: kind,
+      files: files,
+      options: options,
+      onProgress: onProgress,
+      isCancelled: isCancelled,
+    ).whenComplete(() => _transferring = false);
+  }
 
   // ------------------------------------------------------------------ internals
 
@@ -452,6 +469,7 @@ class BajiRepository {
     );
     final payload = _assembler.offer(frame);
     if (payload == null) return;
+    if (_handlePacketSignal(payload)) return;
     final message = CommandCodec.parse(payload);
     if (message == null) {
       BajiLog.instance.info(
@@ -463,6 +481,23 @@ class BajiRepository {
     }
     BajiLog.instance.info('协议', '← ${_describe(message)}');
     _apply(message);
+  }
+
+  /// 设备分包反馈：`GetPacketSuccess` / `GetPacketFail`，返回是否已消费。
+  bool _handlePacketSignal(Uint8List payload) {
+    if (payload.isEmpty) return false;
+    final text = String.fromCharCodes(payload);
+    final failed = text.contains('GetPacketFail');
+    if (!failed && !text.contains('GetPacketSuccess')) return false;
+    if (failed) {
+      final state = device.value;
+      final space = state.totalSpace == null
+          ? ''
+          : '（设备上报：剩余 ${state.freeSpace}，总量 ${state.totalSpace}）';
+      _deviceFailure = '设备报告分包失败 GetPacketFail$space';
+      BajiLog.instance.error('传输', '$_deviceFailure，停止本次传输');
+    }
+    return true;
   }
 
   void _apply(DeviceMessage message) {

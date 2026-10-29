@@ -3,10 +3,7 @@ import 'dart:typed_data';
 import 'baji_frame.dart';
 import 'baji_protocol.dart';
 
-/// 设备上报分包重组。
-///
-/// - documented8：按包号排序，收到 total 个不同包号后拼接；
-/// - compact5：没有包号字段，按 BLE 到达顺序追加，收满 total 帧后拼接。
+/// 设备上报分包重组：documented8 按包号排序，compact5 按到达顺序追加。
 class FrameAssembler {
   FrameAssembler({PacketIndexPolicy? policy})
       : policy = policy ?? BajiConfig.packetIndexPolicy;

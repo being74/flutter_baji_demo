@@ -31,11 +31,12 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 鸿蒙适配说明：版本以 CPF-Flutter 三方库 3.22 配套 TAG 为基准降级。
-  # BLE：pub.dev 主包提供 Android/iOS 原生实现，ohos 实现包单独引入，
-  # 两者 channel 协议同源一致；Dart 侧统一 import flutter_blue_plus_ohos。
-  flutter_blue_plus: 1.33.5 # 与 flutter_blue_plus_ohos fork（基于 1.33.5）严格同版本，保证 channel 协议一致
-  flutter_blue_plus_ohos:
+  # 鸿蒙适配：版本以 CPF-Flutter 三方库 3.22 配套 TAG 为基准。
+  # 注意：Dart 侧只允许 import `flutter_blue_plus_ohos`。两个包各带一份完整 Dart
+  # 实现且共用同一个 MethodChannel，混用会导致一方收不到原生回调（连接超时）。
+  # `flutter_blue_plus` 留在依赖里只为给 Android/iOS 注册原生实现。
+  flutter_blue_plus: 1.33.5 # 仅提供 Android/iOS 原生实现；Dart 侧不要直接引用
+  flutter_blue_plus_ohos: # 唯一的 Dart 入口（含 ohos 原生实现）
     git:
       url: https://gitcode.com/CPF-Flutter/fluttertpc_flutter_blue_plus.git
       path: ohos
@@ -43,6 +44,14 @@ dependencies:
   permission_handler: ^11.3.1
   image_picker: ^1.1.2
   file_picker: ^8.0.6
+  # 鸿蒙端实现：file_picker 本体没有 ohos 平台声明，必须显式引入这个联邦实现包，
+  # 否则 GeneratedPluginRegistrant 不会注册 FilePickerPlugin，pickFiles 会直接
+  # 报「method not implemented」，表现为选不了 GIF / 视频。
+  file_picker_ohos:
+    git:
+      url: https://gitcode.com/CPF-Flutter/fluttertpc_file_picker.git
+      path: ohos
+      ref: 10.2.0-ohos-1.0.0-beta.1
   video_player: ^2.9.2
   image: ^4.0.0
   path_provider: ^2.1.4
