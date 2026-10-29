@@ -1,0 +1,42 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+android {
+    namespace = "com.example.flutter_baji_demo"
+    compileSdk = flutter.compileSdkVersion
+    // 鸿蒙版 Flutter 默认 NDK 23.1 本机未安装，使用已安装版本
+    ndkVersion = "25.1.8937393"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+
+    defaultConfig {
+        applicationId = "com.example.flutter_baji_demo"
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        // 鸿蒙版 FlutterExtension 的 versionCode/versionName 是方法
+        versionCode = flutter.versionCode()
+        versionName = flutter.versionName()
+    }
+
+    buildTypes {
+        release {
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now, so `flutter run --release` works.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}

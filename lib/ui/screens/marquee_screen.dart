@@ -99,8 +99,8 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
         MarqueeStyle(
           text: content,
           fontSize: _fontSize,
-          textColor: _marqueeColors[_textColorIndex].toARGB32(),
-          backgroundColor: _marqueeColors[_backgroundColorIndex].toARGB32(),
+          textColor: _marqueeColors[_textColorIndex].value,
+          backgroundColor: _marqueeColors[_backgroundColorIndex].value,
           mode: MarqueeMode.character,
         ),
       );
@@ -294,8 +294,8 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     onClick: () => viewModel.startMarqueeTransfer(
                       text: _textController.text,
                       fontSize: _fontSize,
-                      textColor: textColor.toARGB32(),
-                      backgroundColor: backgroundColor.toARGB32(),
+                      textColor: textColor.value,
+                      backgroundColor: backgroundColor.value,
                       mode: MarqueeMode.character,
                       intervalMs: _intervalMs,
                     ),
@@ -422,7 +422,7 @@ class _MarqueeFramesPreview extends StatelessWidget {
               child: Text(
                 '输入文字后预览',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: textColor.withValues(alpha: 0.55),
+                      color: textColor.withOpacity(0.55),
                     ),
               ),
             )
@@ -431,7 +431,7 @@ class _MarqueeFramesPreview extends StatelessWidget {
                   child: Text(
                     '生成中…',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: textColor.withValues(alpha: 0.55),
+                          color: textColor.withOpacity(0.55),
                         ),
                   ),
                 )

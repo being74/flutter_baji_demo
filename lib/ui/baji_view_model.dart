@@ -268,10 +268,7 @@ class BajiViewModel extends ChangeNotifier {
 
   void toggleScan() {
     if (_scanning) {
-      _scanSubscription?.cancel();
-      _scanSubscription = null;
-      _scanning = false;
-      notifyListeners();
+      _stopScan();
       return;
     }
     refreshBondedDevices();
@@ -294,6 +291,14 @@ class BajiViewModel extends ChangeNotifier {
     );
   }
 
+  /// 停止扫描。建链前必须调用，避免扫描与 GATT 建链并发导致建链超时。
+  void _stopScan() {
+    _scanSubscription?.cancel();
+    _scanSubscription = null;
+    _scanning = false;
+    notifyListeners();
+  }
+
   Future<void> refreshBondedDevices() async {
     _bondedDevices = await repository.bondedDevices();
     notifyListeners();
@@ -301,6 +306,8 @@ class BajiViewModel extends ChangeNotifier {
 
   Future<void> connect(String address) async {
     final token = ++_connectToken;
+    // 先停扫描再建链：ohos 上两者并发会显著降低建链成功率。
+    _stopScan();
     try {
       await repository.connect(address);
     } catch (error) {
@@ -312,10 +319,8 @@ class BajiViewModel extends ChangeNotifier {
 
   Future<void> disconnect() async {
     _connectToken++;
-    _scanSubscription?.cancel();
-    _scanSubscription = null;
-    _scanning = false;
     _devices = const [];
+    _stopScan();
     try {
       await repository.disconnect();
     } catch (error) {

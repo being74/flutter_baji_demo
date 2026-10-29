@@ -129,7 +129,7 @@ class _BajiAppState extends State<BajiApp> {
             resizeToAvoidBottomInset: true,
             body: PopScope(
               canPop: !showingSecondary,
-              onPopInvokedWithResult: (didPop, result) {
+              onPopInvoked: (didPop) {
                 if (didPop) return;
                 if (crop != null) {
                   viewModel.cancelAlbumCrop();

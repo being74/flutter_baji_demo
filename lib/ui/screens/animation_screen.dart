@@ -274,7 +274,7 @@ class _PreviewCircle extends StatelessWidget {
                       Text(
                         '选择后在此预览',
                         style: textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                          color: scheme.onSurfaceVariant.withOpacity(0.7),
                         ),
                       ),
                     ],
@@ -318,7 +318,7 @@ class _PreviewCircle extends StatelessWidget {
             Text(
               '请尝试重新选择',
               style: textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                color: scheme.onSurfaceVariant.withOpacity(0.7),
               ),
             ),
           ],

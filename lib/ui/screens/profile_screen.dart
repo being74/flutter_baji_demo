@@ -64,7 +64,7 @@ class ProfileScreen extends StatelessWidget {
                           style: textTheme.labelLarge?.copyWith(
                             color: connected
                                 ? butter
-                                : chalk.withValues(alpha: 0.6),
+                                : chalk.withOpacity(0.6),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -82,13 +82,13 @@ class ProfileScreen extends StatelessWidget {
                               ? '${connectedState.address} · MTU ${connectedState.mtu}'
                               : '连接后可读取设备信息',
                           style: textTheme.bodySmall
-                              ?.copyWith(color: chalk.withValues(alpha: 0.62)),
+                              ?.copyWith(color: chalk.withOpacity(0.62)),
                         ),
                       ],
                     ),
                   ),
                   StatusDot(
-                    color: connected ? butter : chalk.withValues(alpha: 0.35),
+                    color: connected ? butter : chalk.withOpacity(0.35),
                   ),
                 ],
               ),
@@ -193,7 +193,7 @@ class ProfileScreen extends StatelessWidget {
   Widget _divider(ColorScheme scheme) => Divider(
         height: 1,
         thickness: 1,
-        color: scheme.outlineVariant.withValues(alpha: 0.6),
+        color: scheme.outlineVariant.withOpacity(0.6),
       );
 }
 
@@ -271,7 +271,7 @@ class _DeviceInfoCard extends StatelessWidget {
   Widget _divider(ColorScheme scheme) => Divider(
         height: 1,
         thickness: 1,
-        color: scheme.outlineVariant.withValues(alpha: 0.6),
+        color: scheme.outlineVariant.withOpacity(0.6),
       );
 }
 

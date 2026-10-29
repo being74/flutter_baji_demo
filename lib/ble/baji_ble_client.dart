@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter_blue_plus_ohos/flutter_blue_plus_ohos.dart';
 
 import '../core/baji_log.dart';
+import '../core/platform.dart';
 import '../protocol/baji_protocol.dart';
 
 sealed class BleConnectionState {
@@ -55,11 +57,7 @@ class DisconnectEvent {
   final String cause;
 }
 
-/// 单服务单特征值的 GATT 客户端。
-///
-/// - 写入统一使用 write without response，所有 GATT 操作串行化；
-/// - 连接后先协商 MTU，再尝试打开 notify/indicate，失败时降级为主动 read；
-/// - 设备上报的原始帧通过 [incoming] 抛出，由上层做协议解析。
+/// 单服务单特征值的 GATT 客户端，所有 GATT 操作串行执行。
 class BajiBleClient {
   BajiBleClient();
 
@@ -67,14 +65,36 @@ class BajiBleClient {
   static const int _requestedMtu = 517;
   static const int _attHeaderSize = 3;
 
-  static const Duration _connectTimeout = Duration(seconds: 20);
+  /// 建链超时。
+  static const Duration _connectTimeout = Duration(seconds: 10);
   static const Duration _notifyTimeout = Duration(seconds: 3);
   static const Duration _writeTimeout = Duration(seconds: 15);
   static const Duration _readTimeout = Duration(seconds: 3);
   static const Duration _writeChunkGap = Duration(milliseconds: 2);
+
+  /// 鸿蒙写入间隔：鸿蒙 writeCharacteristicValue resolve 不等于已发送，间隔过小
+  static const Duration _ohosWriteChunkGap = Duration(milliseconds: 10);
+
+  /// 「操作繁忙」的重试次数与退避区间。
+  static const int _writeAttempts = 3;
+  static const Duration _writeRetryBase = Duration(milliseconds: 20);
+  static const Duration _writeRetryCap = Duration(milliseconds: 80);
+
+  /// 单次写入上限：协议最大帧长 9 + 496 = 505 字节。
+  static const int _maxChunk = BajiConfig.maxFramePayload + 9;
+
+  /// 单次 GATT 写入的最小分片（对应默认 MTU 23 的 ATT 载荷）。
+  static const int _minChunk = 20;
   static const Duration _connectRetryDelay = Duration(milliseconds: 600);
+
+  /// 超时后等协议栈回收 GATT 客户端再重试。
+  static const Duration _timeoutRetryDelay = Duration(milliseconds: 1500);
+
+  /// 停扫描后等系统释放 scanner。
+  static const Duration _scanStopSettle = Duration(milliseconds: 250);
   static const Duration _localDisconnectWindow = Duration(seconds: 5);
   static const int _maxConnectAttempts = 3;
+  static const int _maxTimeoutAttempts = 2;
 
   final ValueNotifier<BleConnectionState> state =
       ValueNotifier<BleConnectionState>(const BleDisconnected());
@@ -93,6 +113,10 @@ class BajiBleClient {
   StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
 
   int _mtu = _defaultMtu;
+
+  /// 自适应分片；为 null 时按 MTU 推算，写入被拒后调小并缓存。
+  int? _adaptiveChunk;
+
   bool _notificationsEnabled = false;
   bool _supportsRead = false;
   bool _localDisconnect = false;
@@ -119,6 +143,9 @@ class BajiBleClient {
     state.value = const BleConnecting();
     BajiLog.instance.info('BLE', '连接 $address');
 
+    // 扫描与 GATT 建链并发会降低建链成功率，先停扫描再建链。
+    await _stopScanBeforeConnect();
+
     Object? lastError;
     for (var attempt = 1; attempt <= _maxConnectAttempts; attempt++) {
       try {
@@ -126,47 +153,105 @@ class BajiBleClient {
         return;
       } catch (error) {
         lastError = error;
-        final retryable = error.toString().contains('133');
-        if (attempt < _maxConnectAttempts && retryable) {
-          BajiLog.instance.warn(
-            'BLE',
-            '连接失败（第 $attempt 次，status=133），'
-            '${_connectRetryDelay.inMilliseconds}ms 后重试',
-          );
-          await _disconnectInternal('status=133 重试前清理');
-          state.value = const BleConnecting();
-          await Future<void>.delayed(_connectRetryDelay);
-        } else {
-          break;
-        }
+        final timeoutFailure = _isTimeoutError(error);
+        if (!_isRetryableConnectError(error)) break;
+
+        final maxAttempts = timeoutFailure ? _maxTimeoutAttempts : _maxConnectAttempts;
+        if (attempt >= maxAttempts) break;
+
+        final delay = timeoutFailure ? _timeoutRetryDelay : _connectRetryDelay;
+        BajiLog.instance.warn(
+          'BLE',
+          '连接失败（第 $attempt 次：${_shortError(error)}），'
+          '${delay.inMilliseconds}ms 后重试',
+        );
+        await _disconnectInternal('重试前清理');
+        state.value = const BleConnecting();
+        await Future<void>.delayed(delay);
       }
     }
 
     final error = lastError ?? StateError('连接失败');
-    BajiLog.instance.error('BLE', '连接失败：$error');
+    final hint = _isTimeoutError(error) ? _timeoutHint : null;
+    BajiLog.instance.error(
+      'BLE',
+      hint == null ? '连接失败：$error' : '连接失败：$error｜$hint',
+    );
     await _disconnectInternal('连接失败清理');
-    state.value = BleFailed(error.toString());
-    throw error;
+    final failure = hint == null ? error : StateError('$error（$hint）');
+    state.value = BleFailed(failure.toString());
+    throw failure;
+  }
+
+  /// 建链前清场：扫描器未释放时部分机型会丢弃建链请求。
+  Future<void> _stopScanBeforeConnect() async {
+    try {
+      if (!FlutterBluePlus.isScanningNow) return;
+      await FlutterBluePlus.stopScan();
+      BajiLog.instance.info('BLE', '建链前已停止扫描，等待扫描器释放');
+      await Future<void>.delayed(_scanStopSettle);
+    } catch (error) {
+      BajiLog.instance.warn('BLE', '建链前停止扫描失败：$error');
+    }
+  }
+
+  /// `fbp-code: 1` 表示等到建链结果超时。
+  static const String _timeoutHint =
+      '建链超时：请确认设备未被其它手机占用，且应用只引用了 flutter_blue_plus_ohos';
+
+  static bool _isTimeoutError(Object error) {
+    final text = error.toString();
+    return text.contains('Timed out') || text.contains('fbp-code: 1');
+  }
+
+  static bool _isRetryableConnectError(Object error) =>
+      error.toString().contains('133') || _isTimeoutError(error);
+
+  static String _shortError(Object error) {
+    final text = error.toString();
+    return text.length <= 80 ? text : '${text.substring(0, 80)}…';
+  }
+
+  /// 手动覆盖建链地址，可用 `--dart-define=OHOS_BLE_ADDRESS=XX:..` 指定。
+  static String _targetAddress(String address) {
+    if (!isOhos) return address;
+    final override = BajiConfig.ohosAddressOverride;
+    if (override == null || override.isEmpty) return address;
+    if (override.toLowerCase() == address.toLowerCase()) return address;
+    return override;
   }
 
   Future<void> _connectOnce(String address) async {
     final generation = ++_connectionGeneration;
-    final device = BluetoothDevice.fromId(address);
+    final target = _targetAddress(address);
+    if (target != address) {
+      BajiLog.instance.info('BLE', '改用 identity 地址建链：$address -> $target');
+    }
+    final device = BluetoothDevice.fromId(target);
     _device = device;
 
-    await device.connect(
-      license: License.nonprofit,
-      timeout: _connectTimeout,
-      mtu: null,
-      autoConnect: false,
+    // 分阶段计时。
+    final watch = Stopwatch()..start();
+    await device.connect(timeout: _connectTimeout, mtu: null);
+    BajiLog.instance.info(
+      'BLE',
+      'ACL 建链完成 ${watch.elapsedMilliseconds}ms',
     );
     if (generation != _connectionGeneration) {
       throw StateError('连接已过期');
     }
 
-    var services = device.servicesList;
-    if (services.isEmpty) {
+    // 每次建链都重新发现服务：插件的 servicesList 会跨重连复用，句柄会失配。
+    List<BluetoothService> services;
+    try {
       services = await device.discoverServices(timeout: 10);
+      BajiLog.instance.info('BLE', '服务发现完成 ${watch.elapsedMilliseconds}ms');
+    } catch (error) {
+      services = device.servicesList;
+      BajiLog.instance.warn('BLE', '服务发现失败：$error，退回缓存 ${services.length} 个服务');
+    }
+    if (services.isEmpty) {
+      throw StateError('未发现任何 GATT 服务');
     }
     if (generation != _connectionGeneration) {
       throw StateError('连接已过期');
@@ -177,33 +262,13 @@ class BajiBleClient {
     _readChar = read;
 
     _mtu = device.mtuNow;
-    if (Platform.isAndroid) {
-      if (_mtu <= _defaultMtu) {
-        try {
-          _mtu = await device.requestMtu(_requestedMtu, timeout: 3);
-        } catch (error) {
-          BajiLog.instance.warn('BLE', 'requestMtu 失败：$error，保持 MTU=$_mtu');
-        }
-      }
-    } else if (_mtu <= _defaultMtu) {
-      // iOS 的 MTU 由系统异步协商，插件会轮询上报。
-      try {
-        _mtu = await device.mtu
-            .firstWhere((value) => value > _defaultMtu)
-            .timeout(const Duration(seconds: 1));
-      } catch (_) {
-        // 协商结果确认是 23 时按 20 字节 GATT 分片，保证不超长。
-      }
+    if (isOhos) {
+      await _subscribeIncoming(device);
+      await _negotiateMtu(device);
+    } else {
+      await _negotiateMtu(device);
+      await _subscribeIncoming(device);
     }
-    final required = BajiConfig.maxDataPayload() + 6 + _attHeaderSize;
-    if (_mtu < required) {
-      BajiLog.instance.warn(
-        'BLE',
-        'MTU 协商结果 $_mtu 小于单帧所需 $required，大帧将被拆成多次 GATT 写入',
-      );
-    }
-
-    await _subscribeIncoming(device);
     if (!device.isConnected || generation != _connectionGeneration) {
       throw StateError('连接已断开');
     }
@@ -223,13 +288,53 @@ class BajiBleClient {
     );
   }
 
+  /// 协商 MTU。鸿蒙插件回传的是请求值，真实分片由写入重试逐级试出。
+  Future<void> _negotiateMtu(BluetoothDevice device) async {
+    if (Platform.isAndroid || isOhos) {
+      if (_mtu > _defaultMtu) return;
+      try {
+        _mtu = await device.requestMtu(_requestedMtu, timeout: 3);
+      } catch (error) {
+        BajiLog.instance.warn('BLE', 'requestMtu 失败：$error，保持 MTU=$_mtu');
+      }
+    } else {
+      if (_mtu > _defaultMtu) return;
+      // iOS 由系统异步协商 MTU。
+      try {
+        _mtu = await device.mtu
+            .firstWhere((value) => value > _defaultMtu)
+            .timeout(const Duration(seconds: 1));
+      } catch (_) {
+        // 协商结果确认是 23 时按 20 字节 GATT 分片，保证不超长。
+      }
+    }
+    final required = BajiConfig.maxDataPayload() + 6 + _attHeaderSize;
+    if (_mtu < required) {
+      BajiLog.instance.warn(
+        'BLE',
+        'MTU 协商结果 $_mtu 小于单帧所需 $required，大帧将被拆成多次 GATT 写入',
+      );
+    }
+  }
+
   Future<void> _subscribeIncoming(BluetoothDevice device) async {
     final characteristic = _readChar!;
     final properties = characteristic.properties;
     _supportsRead = properties.read;
     _notificationsEnabled = false;
 
+    // 链路监听要在提前 return 之前注册，否则断线事件收不到。
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = device.connectionState.listen((value) {
+      if (value == BluetoothConnectionState.disconnected) {
+        _handleDisconnect(device);
+      }
+    });
+
     if (!properties.notify && !properties.indicate) {
+      if (!_supportsRead) {
+        throw StateError('设备既不支持通知也不支持 READ，无法建立数据通道');
+      }
       BajiLog.instance.warn('BLE', '读特征值不支持 notify/indicate，降级为主动 read');
       return;
     }
@@ -246,15 +351,12 @@ class BajiBleClient {
       _notificationsEnabled = true;
     } catch (error) {
       _notificationsEnabled = false;
-      BajiLog.instance.warn('BLE', '开启 notify 失败：$error，降级为主动 read');
-    }
-
-    await _connectionSubscription?.cancel();
-    _connectionSubscription = device.connectionState.listen((value) {
-      if (value == BluetoothConnectionState.disconnected) {
-        _handleDisconnect(device);
+      BajiLog.instance.warn('BLE', '开启 notify 失败：$error');
+      // 通知是唯一上行通道时直接失败，让上层断开重连。
+      if (!_supportsRead) {
+        throw StateError('设备通知通道开启失败，且读特征值不支持 READ');
       }
-    });
+    }
   }
 
   Future<void> disconnect() async {
@@ -305,34 +407,46 @@ class BajiBleClient {
       BajiLog.instance.info('BLE', 'service ${service.uuid.str128}');
       for (final characteristic in service.characteristics) {
         final properties = characteristic.properties;
+        final descriptors = characteristic.descriptors
+            .map((descriptor) => _shortId(descriptor.uuid.str128) ?? descriptor.uuid.str128)
+            .join(',');
         BajiLog.instance.info(
           'BLE',
           '  char ${characteristic.uuid.str128} '
               'read=${properties.read} write=${properties.write} '
               'writeNoResponse=${properties.writeWithoutResponse} '
-              'notify=${properties.notify} indicate=${properties.indicate}',
+              'notify=${properties.notify} indicate=${properties.indicate} '
+              'desc=[$descriptors]',
         );
       }
     }
 
     final allCharacteristics = services.expand((service) => service.characteristics).toList();
-    BluetoothService? service;
-    for (final candidate in services) {
-      if (candidate.uuid.str128 == BajiUuids.service) {
-        service = candidate;
-        break;
+
+    // 按 BajiUuids.sets 的优先级逐组匹配。
+    for (final set in BajiUuids.sets) {
+      BluetoothService? service;
+      for (final candidate in services) {
+        if (candidate.uuid.str128 == set.service ||
+            _shortId(candidate.uuid.str128) == _shortId(set.service)) {
+          service = candidate;
+          break;
+        }
       }
-      if (_shortId(candidate.uuid.str128) == 0x0150) {
-        service = candidate;
-        break;
+      if (service == null) continue;
+      final write = _characteristicByUuid(service, set.write, allCharacteristics);
+      final read = _characteristicByUuid(service, set.read, allCharacteristics);
+      if (write != null && read != null) {
+        BajiLog.instance.info(
+          'BLE',
+          '使用 write=${write.uuid.str128} read=${read.uuid.str128}',
+        );
+        return (write, read);
       }
     }
 
-    BluetoothCharacteristic? write = _characteristicByUuid(service, BajiUuids.write, allCharacteristics);
-    BluetoothCharacteristic? read = _characteristicByUuid(service, BajiUuids.read, allCharacteristics);
-
-    // 厂商自定义服务里特征值 UUID 与文档不一致时，仅在唯一候选时按属性回退。
-    if (write == null || read == null) {
+    // 兜底：在厂商自定义服务里按属性取唯一候选。
+    {
       final custom = services.where((service) {
         final short = _shortId(service.uuid.str128);
         return short == null || !BajiUuids.standardServiceIds.contains(short);
@@ -350,26 +464,20 @@ class BajiBleClient {
           readable[characteristic.uuid] = characteristic;
         }
       }
-      if (write == null && writable.length == 1) write = writable.values.first;
-      if (read == null && readable.length == 1) read = readable.values.first;
-      if (write != null || read != null) {
+      final write = writable.length == 1 ? writable.values.first : null;
+      final read = readable.length == 1 ? readable.values.first : null;
+      if (write != null && read != null) {
         BajiLog.instance.warn(
           'BLE',
-          '未匹配到文档 UUID，按属性回退：'
-              'write=${write?.uuid.str128} read=${read?.uuid.str128}',
+          '未匹配到已知 UUID 组，按属性回退：'
+              'write=${write.uuid.str128} read=${read.uuid.str128}',
         );
+        return (write, read);
       }
     }
 
-    if (write == null || read == null) {
-      final dump = services.map((service) => service.uuid.str128).join('; ');
-      throw StateError('未找到 0x0150/0x0151/0x0152。设备服务：$dump');
-    }
-    BajiLog.instance.info(
-      'BLE',
-      '使用 write=${write.uuid.str128} read=${read.uuid.str128}',
-    );
-    return (write, read);
+    final dump = services.map((service) => service.uuid.str128).join('; ');
+    throw StateError('未找到可用的写入/读取特征值。设备服务：$dump');
   }
 
   BluetoothCharacteristic? _characteristicByUuid(
@@ -401,7 +509,7 @@ class BajiBleClient {
 
   // ------------------------------------------------------------------ io
 
-  /// 写入一个完整协议帧；若帧长超过 (MTU-3)，在 GATT 层再切分。
+  /// 写入一个完整协议帧，超过单包大小则在 GATT 层切分。
   Future<void> writeFrame(Uint8List frame) => _serialize(
         () => _writeFrameLocked(frame).timeout(_writeTimeout),
       );
@@ -411,19 +519,101 @@ class BajiBleClient {
     final characteristic = _writeChar;
     if (characteristic == null) throw StateError('写特征值不可用');
 
-    final maxChunk = (_platformMtu - _attHeaderSize).clamp(20, 512);
+    var maxChunk = _currentChunk;
     if (frame.length > maxChunk) {
       final times = (frame.length + maxChunk - 1) ~/ maxChunk;
       BajiLog.instance.warn('BLE', '帧 ${frame.length}B 超过 GATT 单包 $maxChunk，分 $times 次写入');
     }
     var offset = 0;
     while (offset < frame.length) {
+      // 掉线后原生侧服务已失效，提前中断。
+      if (state.value is! BleConnected) {
+        throw StateError('设备连接已断开，写入中断（已发送 $offset/${frame.length} 字节）');
+      }
       final end = offset + maxChunk < frame.length ? offset + maxChunk : frame.length;
       final chunk = Uint8List.sublistView(frame, offset, end);
-      await characteristic.write(chunk, withoutResponse: true);
+      try {
+        await _writeChunk(characteristic, chunk);
+      } catch (error) {
+        // 分片超出真实 MTU 时系统只回笼统错误，因此失败就减半重写当前段。
+        if (maxChunk > _minChunk) {
+          maxChunk = (maxChunk ~/ 2).clamp(_minChunk, _maxChunk);
+          _adaptiveChunk = maxChunk;
+          BajiLog.instance.warn(
+            'BLE',
+            '写入失败，分片降级为 $maxChunk 字节后重写当前段：${_shortError(error)}',
+          );
+          continue;
+        }
+        throw StateError(_describeWriteFailure(error, offset, frame.length));
+      }
       offset = end;
-      await Future<void>.delayed(_writeChunkGap);
+      final gap = isOhos ? _ohosWriteChunkGap : _writeChunkGap;
+      if (gap > Duration.zero) await Future<void>.delayed(gap);
     }
+  }
+
+  /// 当前分片大小：首次按 MTU 推算，写入被拒后减半并记忆。
+  int get _currentChunk =>
+      _adaptiveChunk ??= (_mtu - _attHeaderSize).clamp(_minChunk, _maxChunk);
+
+  /// 写单个分片，繁忙时做几次短退避重试。
+  Future<void> _writeChunk(
+    BluetoothCharacteristic characteristic,
+    Uint8List chunk,
+  ) async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        await characteristic.write(chunk, withoutResponse: true);
+        return;
+      } catch (error) {
+        if (attempt >= _writeAttempts || !_isTransientWriteError(error)) rethrow;
+        // 20/40/80ms 递进。
+        final backoff = _writeRetryBase.inMilliseconds << (attempt - 1);
+        final wait = Duration(
+          milliseconds: backoff.clamp(
+            _writeRetryBase.inMilliseconds,
+            _writeRetryCap.inMilliseconds,
+          ),
+        );
+        BajiLog.instance.warn(
+          'BLE',
+          'GATT 写入繁忙，${wait.inMilliseconds}ms 后重试（$attempt/$_writeAttempts，'
+              '分片 ${chunk.length}B）',
+        );
+        await Future<void>.delayed(wait);
+      }
+    }
+  }
+
+  static bool _isTransientWriteError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('busy') || message.contains('not complete');
+  }
+
+  /// 把原生侧写入异常翻译成可读原因。
+  static String _describeWriteFailure(
+    Object error,
+    int sent,
+    int total,
+  ) {
+    final message = error is PlatformException
+        ? (error.message ?? error.code)
+        : error.toString();
+    final String reason;
+    if (message.contains('service not found') ||
+        message.contains('characteristic not found')) {
+      reason = '设备的 GATT 服务已失效（链路刚断开，或重连后尚未完成服务发现）';
+    } else if (message.contains('not connected') ||
+        message.contains('disconnected') ||
+        message.contains('Device is not connected')) {
+      reason = '设备连接已断开';
+    } else if (message.contains('busy') || message.contains('not complete')) {
+      reason = 'GATT 操作未完成（分片超过当前链路 MTU 时也会返回该错误）';
+    } else {
+      reason = '写入失败：$message';
+    }
+    return '$reason。已发送 $sent/$total 字节，请重新连接设备后重试';
   }
 
   /// 主动读取设备消息；仅当读特征值支持 READ 时可用。
@@ -479,6 +669,7 @@ class BajiBleClient {
     _writeChar = null;
     _readChar = null;
     _mtu = _defaultMtu;
+    _adaptiveChunk = null;
     _notificationsEnabled = false;
     _supportsRead = false;
   }
