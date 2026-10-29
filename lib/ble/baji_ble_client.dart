@@ -164,10 +164,11 @@ class BajiBleClient {
       throw StateError('连接已过期');
     }
 
-    var services = device.servicesList;
-    if (services.isEmpty) {
-      services = await device.discoverServices(timeout: 10);
-    }
+    // flutter_blue_plus 的 servicesList 是跨连接缓存（断开时不清空），
+    // 不能据此跳过服务发现：重连后原生 GATT 服务表为空，
+    // 写入会抛 PlatformException(writeCharacteristic, primary service not found ...)。
+    // 插件要求每次连接后都重新 discoverServices。
+    final services = await device.discoverServices(timeout: 10);
     if (generation != _connectionGeneration) {
       throw StateError('连接已过期');
     }
