@@ -141,8 +141,8 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
     return MarqueeStyle(
       text: _textController.text.trim(),
       fontSize: _fontSize,
-      textColor: palette.foreground.toARGB32(),
-      backgroundColor: palette.background.toARGB32(),
+      textColor: palette.foreground.value,
+      backgroundColor: palette.background.value,
       mode: _mode,
     );
   }
@@ -636,7 +636,7 @@ class _MarqueeFramesPreview extends StatelessWidget {
         child: Text(
           '输入文字后预览',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: textColor.withValues(alpha: 0.55),
+                color: textColor.withOpacity(0.55),
               ),
         ),
       );
@@ -651,7 +651,7 @@ class _MarqueeFramesPreview extends StatelessWidget {
         child: Text(
           '生成中…',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: textColor.withValues(alpha: 0.55),
+                color: textColor.withOpacity(0.55),
               ),
         ),
       );
