@@ -3,8 +3,20 @@ import 'dart:typed_data';
 
 /// JPEG 帧 → 动图 bin 容器。
 ///
-/// 布局：32B 文件头（魔数/首帧偏移/帧数/帧间隔/时长串/总长）+ N×16B 地址表 +
-/// 每帧（current + next + 24B 元数据 + JPEG）。
+/// 布局：
+/// ```
+/// 文件头(32B)
+///   0x12345678            固定
+///   firstOffset - 8       首帧地址减 8（= 32 + 16N - 8）
+///   frameCount            帧数
+///   intervalMs            帧间隔
+///   "output/<duration>ms\0" 12B，始终 NUL 结尾；放不下时退回 output/50ms\0（≥100ms）
+///   totalSize             bin 文件总大小
+/// 地址表(N × 16B)
+///   "frame_%05d."(12B) + 帧绝对偏移(4B)
+/// 每帧
+///   current(4B) + next(4B) + 24B 元数据 + JPEG
+/// ```
 abstract final class AnimBinEncoder {
   static const int magic = 0x12345678;
   static const int fileHeaderSize = 32;
@@ -15,6 +27,10 @@ abstract final class AnimBinEncoder {
 
   static const int _maxFrames = 99999;
   static const int _durationLabelSize = 12;
+
+  /// bin 头的 intervalMs 为 uint32；轮播最慢 5 秒/张需要真实写入该值。
+  /// 设备固件若自行钳制，属于固件行为，不影响文件内容。
+  static const int maxIntervalMs = 5000;
 
   static Uint8List encode({
     required List<Uint8List> frames,
@@ -28,7 +44,7 @@ abstract final class AnimBinEncoder {
     }
     if (width < 0 || width > 0xFFFF) throw ArgumentError('width $width out of range');
     if (height < 0 || height > 0xFFFF) throw ArgumentError('height $height out of range');
-    if (intervalMs < 0 || intervalMs > 999) {
+    if (intervalMs < 0 || intervalMs > maxIntervalMs) {
       throw ArgumentError('intervalMs $intervalMs out of range');
     }
 

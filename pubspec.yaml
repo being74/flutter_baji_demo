@@ -52,7 +52,6 @@ dependencies:
       url: https://gitcode.com/CPF-Flutter/fluttertpc_file_picker.git
       path: ohos
       ref: 10.2.0-ohos-1.0.0-beta.1
-  video_player: ^2.9.2
   image: ^4.0.0
   path_provider: ^2.1.4
   path: ^1.9.0
@@ -81,11 +80,6 @@ dependency_overrides:
       url: https://gitcode.com/CPF-Flutter/flutter_packages.git
       path: packages/path_provider/path_provider
       ref: provider-v2.1.4_ohos-1.0.1
-  video_player:
-    git:
-      url: https://gitcode.com/CPF-Flutter/flutter_packages.git
-      path: packages/video_player/video_player
-      ref: video_player-v2.9.2-ohos-1.0.1
 
 dev_dependencies:
   flutter_test:

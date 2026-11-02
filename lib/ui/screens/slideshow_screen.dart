@@ -283,8 +283,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
                     children: [
                       const Expanded(child: _FormLabel('播放速度', alignStart: true)),
                       Text(
-                        '~${(1000 / _intervalMs).round()} 张/秒 · '
-                        '${_intervalMs}ms/张',
+                        _speedLabel(_intervalMs),
                         style: textTheme.labelLarge
                             ?.copyWith(color: scheme.onSurfaceVariant),
                       ),
@@ -350,6 +349,17 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       ),
     );
   }
+}
+
+String _speedLabel(int intervalMs) {
+  if (intervalMs < 1000) {
+    return '~${(1000 / intervalMs).round()} 张/秒 · ${intervalMs}ms/张';
+  }
+  final seconds = intervalMs / 1000;
+  final text = seconds == seconds.roundToDouble()
+      ? seconds.toStringAsFixed(0)
+      : seconds.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+  return '每 $text 秒 1 张';
 }
 
 class _FormLabel extends StatelessWidget {

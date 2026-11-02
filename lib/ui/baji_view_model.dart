@@ -142,14 +142,17 @@ class AnimationSourceUi {
     required this.name,
     required this.kind,
     required this.durationMs,
-    this.preview,
+    this.frames = const [],
   });
 
   final String path;
   final String name;
   final AnimationKind kind;
   final int durationMs;
-  final Uint8List? preview;
+
+  /// 按 [AnimationLimits.minIntervalMs] 固定步长采样、368×368 的 JPEG 帧。
+  /// 预览与上传共用同一组帧，实际播放节奏由速度滑杆决定。
+  final List<Uint8List> frames;
 }
 
 /// “动图”页的采样约束：源最长 3 秒，最多 30 帧。
@@ -165,7 +168,9 @@ abstract final class AnimationLimits {
 abstract final class SlideshowLimits {
   static const int maxImages = 30;
   static const int minIntervalMs = 200;
-  static const int maxIntervalMs = 999;
+
+  /// 最慢每 5 秒 1 张。
+  static const int maxIntervalMs = 5000;
   static const int defaultIntervalMs = 500;
 }
 
@@ -423,33 +428,46 @@ class BajiViewModel extends ChangeNotifier {
     beginAlbumCrop(files);
   }
 
-  /// 用户在“动图”页选中 GIF/视频后，后台解析名称、时长与首帧预览。
+  /// 用户在“动图”页选中 GIF/视频后，后台解析名称、时长，并按固定 100ms
+  /// 步长采样帧（预览与上传共用）。
   Future<void> selectAnimationSource(PickedMedia picked) async {
     if (_transfer.running) return;
     try {
       final isGif = MediaFiles.isGif(picked.name);
       final isVideo = MediaFiles.isVideo(picked.name);
       if (!isGif && !isVideo) throw StateError('请选择 GIF 或视频');
+      final List<Uint8List> frames;
+      final int duration;
       if (isGif) {
         final bytes = picked.bytes ??
             await _readFileBytes(picked.path, picked.name);
-        final duration = await GifSampler.durationMs(bytes);
-        _animationSource = AnimationSourceUi(
-          path: picked.path,
-          name: picked.name,
-          kind: AnimationKind.gif,
-          durationMs: duration,
+        duration = await GifSampler.durationMs(bytes);
+        frames = await GifSampler.sampleFrames(
+          bytes,
+          intervalMs: AnimationLimits.minIntervalMs,
+          maxFrames: AnimationLimits.maxFrames,
+          maxDurationMs: AnimationLimits.maxDurationMs,
+          size: albumCropSize,
         );
       } else {
         final info = await VideoFrames.load(picked.path, maxSize: _previewMaxSize);
-        _animationSource = AnimationSourceUi(
-          path: picked.path,
-          name: picked.name,
-          kind: AnimationKind.video,
-          durationMs: info.durationMs,
-          preview: info.preview,
+        duration = info.durationMs;
+        frames = await VideoFrames.extract(
+          picked.path,
+          intervalMs: AnimationLimits.minIntervalMs,
+          maxFrames: AnimationLimits.maxFrames,
+          maxDurationMs: AnimationLimits.maxDurationMs,
+          size: albumCropSize,
         );
       }
+      if (frames.isEmpty) throw StateError('没有生成可用帧');
+      _animationSource = AnimationSourceUi(
+        path: picked.path,
+        name: picked.name,
+        kind: isGif ? AnimationKind.gif : AnimationKind.video,
+        durationMs: duration,
+        frames: frames,
+      );
       _transfer = const TransferUiState();
       notifyListeners();
     } catch (error) {
@@ -457,7 +475,8 @@ class BajiViewModel extends ChangeNotifier {
     }
   }
 
-  /// 上传当前选中的动图；intervalMs 来自“播放速度”滑杆。
+  /// 上传当前选中的动图；intervalMs 来自“播放速度”滑杆，只决定设备端
+  /// 每帧停留时间，帧序列是选源时按固定步长采样好的。
   Future<void> startAnimationTransfer(int intervalMs) async {
     final source = _animationSource;
     if (source == null) {
@@ -468,7 +487,6 @@ class BajiViewModel extends ChangeNotifier {
     _transfer = const TransferUiState(
       running: true,
       kind: TransferKind.ambience,
-      message: '正在提取 JPG 帧…',
     );
     notifyListeners();
     try {
@@ -476,26 +494,7 @@ class BajiViewModel extends ChangeNotifier {
         AnimationLimits.minIntervalMs,
         AnimationLimits.maxIntervalMs,
       );
-      final List<Uint8List> frames;
-      if (source.kind == AnimationKind.gif) {
-        final bytes = await _readFileBytes(source.path, source.name);
-        frames = await GifSampler.sampleFrames(
-          bytes,
-          intervalMs: safeInterval,
-          maxFrames: AnimationLimits.maxFrames,
-          maxDurationMs: AnimationLimits.maxDurationMs,
-          size: albumCropSize,
-        );
-      } else {
-        frames = await VideoFrames.extract(
-          source.path,
-          intervalMs: safeInterval,
-          maxFrames: AnimationLimits.maxFrames,
-          maxDurationMs: AnimationLimits.maxDurationMs,
-          size: albumCropSize,
-        );
-      }
-      if (token != _transferToken) return;
+      final frames = source.frames;
       if (frames.isEmpty) throw StateError('没有生成可用帧');
       final bytes = AnimBinEncoder.encode(
         frames: frames,

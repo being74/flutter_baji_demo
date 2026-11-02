@@ -241,15 +241,11 @@ class BajiBleClient {
       throw StateError('连接已过期');
     }
 
-    // 每次建链都重新发现服务：插件的 servicesList 会跨重连复用，句柄会失配。
-    List<BluetoothService> services;
-    try {
-      services = await device.discoverServices(timeout: 10);
-      BajiLog.instance.info('BLE', '服务发现完成 ${watch.elapsedMilliseconds}ms');
-    } catch (error) {
-      services = device.servicesList;
-      BajiLog.instance.warn('BLE', '服务发现失败：$error，退回缓存 ${services.length} 个服务');
-    }
+    // 每次建链都重新发现服务：插件的 servicesList 是跨连接缓存（断开时不清空），
+    // 不能退回缓存——重连后原生 GATT 服务表为空，写入会抛
+    // PlatformException(writeCharacteristic, primary service not found ...)。
+    final services = await device.discoverServices(timeout: 10);
+    BajiLog.instance.info('BLE', '服务发现完成 ${watch.elapsedMilliseconds}ms');
     if (services.isEmpty) {
       throw StateError('未发现任何 GATT 服务');
     }
