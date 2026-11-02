@@ -105,9 +105,16 @@ class _BajiAppState extends State<BajiApp> {
         // albumCrop 必须在监听器内部读取：裁剪流程结束时它会变为 null，
         // 若在 build 外层捕获，页面会停留在已释放的裁剪页上。
         final crop = viewModel.albumCrop;
+        final overlay = _buildOverlay();
+        final scheme = Theme.of(context).colorScheme;
         final dark = Theme.of(context).brightness == Brightness.dark;
-        final lightIcons =
-            crop == null && _overlay == _Overlay.none && _tab == 0;
+        final lightIcons = crop == null && overlay == null && _tab == 0;
+        // 首页底部是 surface 色的导航栏，相册裁剪页自身也是 surface 色；
+        // 其余二级页面铺的是 scaffoldBackgroundColor。系统导航栏（底部
+        // 安全区）要和对应页面同色，否则会露出一条异色。
+        final navigationBarColor = overlay != null && crop == null
+            ? Theme.of(context).scaffoldBackgroundColor
+            : scheme.surface;
         final overlayStyle = SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: lightIcons || dark
@@ -116,12 +123,11 @@ class _BajiAppState extends State<BajiApp> {
           statusBarBrightness: lightIcons || dark
               ? Brightness.dark
               : Brightness.light,
-          systemNavigationBarColor: Theme.of(context).colorScheme.surface,
+          systemNavigationBarColor: navigationBarColor,
           systemNavigationBarIconBrightness:
               dark ? Brightness.light : Brightness.dark,
         );
 
-        final overlay = _buildOverlay();
         final showingSecondary = overlay != null || crop != null;
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: overlayStyle,
