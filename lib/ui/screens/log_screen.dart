@@ -39,7 +39,7 @@ class LogScreen extends StatelessWidget {
               separatorBuilder: (context, index) => Divider(
                 height: 1,
                 thickness: 1,
-                color: scheme.outlineVariant.withValues(alpha: 0.5),
+                color: scheme.outlineVariant.withOpacity(0.5),
               ),
               itemBuilder: (context, index) {
                 if (entries.isEmpty) {

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../ble/baji_ble_client.dart';
 import '../../ble/baji_scanner.dart';
 import '../../ble/ble_permissions.dart';
+import '../../core/platform.dart';
 import '../../data/reconnect_state.dart';
 import '../../media/media_files.dart';
 import '../baji_view_model.dart';
@@ -78,7 +79,8 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _permissionsGranted = result);
       if (!result) return;
     }
-    if (Platform.isAndroid && !await BlePermissions.isBluetoothEnabled()) {
+    // ohos 无应用内开启蓝牙接口，关着时同样提示去系统设置。
+    if ((Platform.isAndroid || isOhos) && !await BlePermissions.isBluetoothEnabled()) {
       await BlePermissions.requestEnable();
       if (!await BlePermissions.isBluetoothEnabled()) {
         widget.viewModel.showMessage('请先在系统设置中打开蓝牙');
@@ -217,7 +219,7 @@ class _ConnectionHero extends StatelessWidget {
                     child: Text(
                       'baji',
                       style: textTheme.labelSmall?.copyWith(
-                        color: chalk.withValues(alpha: 0.55),
+                        color: chalk.withOpacity(0.55),
                       ),
                     ),
                   ),
@@ -288,14 +290,14 @@ class _ConnectionHero extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           '${state.address} · MTU ${state.mtu}',
-          style: textTheme.bodySmall?.copyWith(color: chalk.withValues(alpha: 0.62)),
+          style: textTheme.bodySmall?.copyWith(color: chalk.withOpacity(0.62)),
         ),
         const SizedBox(height: 22),
         OutlinePill(
           text: '断开连接',
           onClick: onDisconnect,
           contentColor: chalk,
-          borderColor: chalk.withValues(alpha: 0.55),
+          borderColor: chalk.withOpacity(0.55),
         ),
       ],
     );
@@ -310,14 +312,14 @@ class _ConnectionHero extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           '正在建立 GATT 连接并协商 MTU',
-          style: textTheme.bodyMedium?.copyWith(color: chalk.withValues(alpha: 0.78)),
+          style: textTheme.bodyMedium?.copyWith(color: chalk.withOpacity(0.78)),
         ),
         const SizedBox(height: 20),
         ClipRRect(
           borderRadius: BorderRadius.circular(2),
           child: LinearProgressIndicator(
             minHeight: 4,
-            backgroundColor: chalk.withValues(alpha: 0.2),
+            backgroundColor: chalk.withOpacity(0.2),
             valueColor: const AlwaysStoppedAnimation<Color>(butter),
           ),
         ),
@@ -335,7 +337,7 @@ class _ConnectionHero extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           state.message,
-          style: textTheme.bodyMedium?.copyWith(color: chalk.withValues(alpha: 0.78)),
+          style: textTheme.bodyMedium?.copyWith(color: chalk.withOpacity(0.78)),
         ),
         const SizedBox(height: 20),
         FilledPill(
@@ -357,7 +359,7 @@ class _ConnectionHero extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           '打开蓝牙，靠近它，两秒内自己报到。',
-          style: textTheme.bodyMedium?.copyWith(color: chalk.withValues(alpha: 0.78)),
+          style: textTheme.bodyMedium?.copyWith(color: chalk.withOpacity(0.78)),
         ),
         const SizedBox(height: 22),
         FilledPill(
@@ -523,7 +525,7 @@ class _DeviceRow extends StatelessWidget {
           StatusDot(
             color: device.hasTargetService
                 ? cobalt
-                : scheme.outline.withValues(alpha: 0.35),
+                : scheme.outline.withOpacity(0.35),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -585,7 +587,7 @@ class _AlbumCard extends StatelessWidget {
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(color: content.withValues(alpha: 0.7)),
+                            ?.copyWith(color: content.withOpacity(0.7)),
                       ),
                     ],
                   ),
@@ -600,8 +602,8 @@ class _AlbumCard extends StatelessWidget {
               enabled: enabled,
               containerColor: ink,
               contentColor: butter,
-              disabledContainerColor: content.withValues(alpha: 0.14),
-              disabledContentColor: content.withValues(alpha: 0.45),
+              disabledContainerColor: content.withOpacity(0.14),
+              disabledContentColor: content.withOpacity(0.45),
             ),
           ],
         ),
@@ -734,7 +736,7 @@ class _MarqueeCard extends StatelessWidget {
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(color: content.withValues(alpha: 0.7)),
+                            ?.copyWith(color: content.withOpacity(0.7)),
                       ),
                     ],
                   ),
@@ -749,8 +751,8 @@ class _MarqueeCard extends StatelessWidget {
               enabled: enabled,
               containerColor: butter,
               contentColor: ink,
-              disabledContainerColor: content.withValues(alpha: 0.16),
-              disabledContentColor: content.withValues(alpha: 0.45),
+              disabledContainerColor: content.withOpacity(0.16),
+              disabledContentColor: content.withOpacity(0.45),
             ),
           ],
         ),
@@ -807,7 +809,7 @@ class _AmbienceMark extends StatelessWidget {
             width: 24,
             height: 24,
             decoration: BoxDecoration(
-              color: vermilion.withValues(alpha: 0.85),
+              color: vermilion.withOpacity(0.85),
               shape: BoxShape.circle,
             ),
           ),
@@ -818,7 +820,7 @@ class _AmbienceMark extends StatelessWidget {
               width: 24,
               height: 24,
               decoration: BoxDecoration(
-                color: cobalt.withValues(alpha: 0.75),
+                color: cobalt.withOpacity(0.75),
                 shape: BoxShape.circle,
               ),
             ),
@@ -840,7 +842,7 @@ class _SlideshowMark extends StatelessWidget {
           width: 14,
           height: 14,
           decoration: BoxDecoration(
-            color: cobalt.withValues(alpha: 0.45),
+            color: cobalt.withOpacity(0.45),
             borderRadius: BorderRadius.circular(4),
           ),
         ),
@@ -858,7 +860,7 @@ class _SlideshowMark extends StatelessWidget {
           width: 14,
           height: 14,
           decoration: BoxDecoration(
-            color: cobalt.withValues(alpha: 0.45),
+            color: cobalt.withOpacity(0.45),
             borderRadius: BorderRadius.circular(4),
           ),
         ),
@@ -884,7 +886,7 @@ class _MarqueeMark extends StatelessWidget {
           Container(
             width: 28,
             height: 4,
-            color: color.withValues(alpha: 0.6),
+            color: color.withOpacity(0.6),
           ),
           const SizedBox(height: 5),
           Container(width: 35, height: 4, color: butter),

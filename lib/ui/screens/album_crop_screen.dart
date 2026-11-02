@@ -260,7 +260,7 @@ class _CropPainter extends CustomPainter {
       Paint()..filterQuality = FilterQuality.high,
     );
 
-    final mask = Paint()..color = Colors.black.withValues(alpha: 0.55);
+    final mask = Paint()..color = Colors.black.withOpacity(0.55);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, top), mask);
     canvas.drawRect(
       Rect.fromLTWH(0, top + side, size.width, math.max(0, size.height - top - side)),

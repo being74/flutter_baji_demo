@@ -1,14 +1,16 @@
 import 'dart:io' show Platform;
 
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_blue_plus_ohos/flutter_blue_plus_ohos.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../core/platform.dart';
+
 /// Android 12+ 用 BLUETOOTH_SCAN/CONNECT；更低版本扫描需要定位权限。
-/// iOS 由 CoreBluetooth 在首次使用时自动弹窗。
+/// ohos 用 ohos.permission.ACCESS_BLUETOOTH（permission_handler_ohos 将
+/// Permission.bluetoothConnect 映射到该权限）；iOS 由 CoreBluetooth 自动弹窗。
 abstract final class BlePermissions {
   static Future<bool> granted() async {
-    if (!Platform.isAndroid) return true;
     final permissions = await _required();
     for (final permission in permissions) {
       if (!await permission.isGranted) return false;
@@ -17,7 +19,6 @@ abstract final class BlePermissions {
   }
 
   static Future<bool> request() async {
-    if (!Platform.isAndroid) return true;
     final permissions = await _required();
     final statuses = await permissions.request();
     return statuses.isNotEmpty && statuses.values.every((status) => status.isGranted);
@@ -36,6 +37,7 @@ abstract final class BlePermissions {
   }
 
   /// Android 上无法通过 Intent 强制打开蓝牙时，使用系统的开启弹窗。
+  /// ohos 无应用侧开启接口，只能引导用户去系统设置。
   static Future<void> requestEnable() async {
     if (!Platform.isAndroid) return;
     try {
@@ -44,6 +46,8 @@ abstract final class BlePermissions {
   }
 
   static Future<List<Permission>> _required() async {
+    if (isOhos) return [Permission.bluetoothConnect];
+    if (!Platform.isAndroid) return const [];
     final info = await DeviceInfoPlugin().androidInfo;
     if (info.version.sdkInt >= 31) {
       return [Permission.bluetoothScan, Permission.bluetoothConnect];

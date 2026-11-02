@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
-/// 协议文档存在多处表述歧义（详见 native 项目 doc/PROTOCOL_NOTES.md），
-/// 所有可能需要在联调时调整的开关都集中在这里。
+/// 协议联调开关集中在这里。
 abstract final class BajiConfig {
   /// 单帧数据域上限（文档 2.1 节）。
   static const int maxFramePayload = 496;
@@ -26,6 +25,14 @@ abstract final class BajiConfig {
 
   /// 设备主动断开后是否自动重连。
   static bool autoReconnect = true;
+
+  /// 鸿蒙专用：用指定地址代替扫描到的地址建链，现场兜底用。
+  /// 通过 `--dart-define=OHOS_BLE_ADDRESS=XX:XX:XX:XX:XX:XX` 指定，为空不替换。
+  static const String _addressOverrideEnv =
+      String.fromEnvironment('OHOS_BLE_ADDRESS');
+
+  static String? ohosAddressOverride =
+      _addressOverrideEnv.isEmpty ? null : _addressOverrideEnv;
 
   /// 自动重连的退避间隔；列表长度即最大尝试次数。
   static List<Duration> autoReconnectDelays = const [
@@ -96,10 +103,38 @@ enum DataEncoding {
 }
 
 abstract final class BajiUuids {
-  static const String service = '00000150-0000-1000-8000-00805f9b34fb';
-  static const String write = '00000151-0000-1000-8000-00805f9b34fb';
-  static const String read = '00000152-0000-1000-8000-00805f9b34fb';
+  /// 设备服务与特征值：服务 `0x01A0`、写 `0x01A1`（write without response）、
+  /// 读/通知 `0x01A2`（notify）。
+  static const String service = '000001a0-0000-1000-8000-00805f9b34fb';
+  static const String write = '000001a1-0000-1000-8000-00805f9b34fb';
+  static const String read = '000001a2-0000-1000-8000-00805f9b34fb';
   static const String cccd = '00002902-0000-1000-8000-00805f9b34fb';
+
+  /// 兼容组 `0x0150/0151/0152`，供仍使用该组 UUID 的固件。
+  static const String legacyService = '00000150-0000-1000-8000-00805f9b34fb';
+  static const String legacyWrite = '00000151-0000-1000-8000-00805f9b34fb';
+  static const String legacyRead = '00000152-0000-1000-8000-00805f9b34fb';
+
+  /// 建链时按优先级逐组精确匹配，整组命中即采用。
+  static const List<({String service, String write, String read})> sets = [
+    (service: service, write: write, read: read),
+    (service: legacyService, write: legacyWrite, read: legacyRead),
+  ];
+
+  /// UUID 是否属于任一已知服务组。
+  static bool matchesService(String uuid) => sets.any(
+        (set) =>
+            uuid == set.service || _shortOf(uuid) == _shortOf(set.service),
+      );
+
+  static int? _shortOf(String uuid) {
+    if (uuid.length != 36) return null;
+    const suffix = '-0000-1000-8000-00805f9b34fb';
+    if (!uuid.startsWith('0000') || !uuid.toLowerCase().endsWith(suffix)) {
+      return null;
+    }
+    return int.tryParse(uuid.substring(4, 8), radix: 16);
+  }
 
   /// 回退匹配时排除的通用 GATT 服务，避免误选电池/设备信息等特征值。
   static const Set<int> standardServiceIds = {

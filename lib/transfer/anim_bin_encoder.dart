@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// JPEG 帧 → 动图 bin 容器，严格按厂商 docx 生成。
+/// JPEG 帧 → 动图 bin 容器。
 ///
 /// 布局：
 /// ```
@@ -94,10 +94,7 @@ abstract final class AnimBinEncoder {
     return bin;
   }
 
-  /// docx 的 12B 字段以固定 `ms\0` 结尾。实测两份样本在 interval=100/50 时都写
-  /// `output/50ms\0`；100ms 的 `output/100ms` 恰好 12B 且无 NUL，若设备按 C 字符串
-  /// 读取会越界到 @28（文件大小）。因此：≤99ms 写实际时长并保留结尾 NUL，
-  /// 放不下时退回样本一致的 `output/50ms\0`。
+  /// 12B 时长字段必须以 NUL 结尾，放不下时退回 `output/50ms`。
   static Uint8List _durationLabel(int intervalMs) {
     final label = Uint8List(_durationLabelSize);
     final preferred = 'output/${intervalMs}ms';

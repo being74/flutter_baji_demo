@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+// 必须与 baji_ble_client 用同一个 BLE 包，两个包共用 MethodChannel，混用会丢回调。
+import 'package:flutter_blue_plus_ohos/flutter_blue_plus_ohos.dart';
 
 import '../core/baji_log.dart';
 import '../protocol/baji_protocol.dart';
@@ -22,10 +23,7 @@ class BajiDevice {
   final List<String> serviceUuids;
 }
 
-/// 扫描周围 BLE 设备，只保留 e-BADGE。
-///
-/// 实测广播名为 `e-BADGE`，名称可能带后缀，因此使用不区分大小写的包含匹配；
-/// 结果按 RSSI 从强到弱排序。
+/// 扫描周围 BLE 设备，只保留 e-BADGE，结果按 RSSI 从强到弱排序。
 class BajiScanner {
   static const Duration _emitInterval = Duration(milliseconds: 250);
   static const Duration _scanTimeout = Duration(minutes: 10);
@@ -70,9 +68,7 @@ class BajiScanner {
             name: name,
             address: result.device.remoteId.str,
             rssi: result.rssi,
-            hasTargetService: services.any(
-              (uuid) => uuid == BajiUuids.service || _shortId(uuid) == 0x0150,
-            ),
+            hasTargetService: services.any(BajiUuids.matchesService),
             serviceUuids: services,
           );
         }
@@ -116,13 +112,6 @@ class BajiScanner {
       BajiLog.instance.warn('扫描', '读取已配对设备失败：$error');
       return const [];
     }
-  }
-
-  static int? _shortId(String uuid) {
-    if (uuid.length != 36) return null;
-    const suffix = '-0000-1000-8000-00805f9b34fb';
-    if (!uuid.startsWith('0000') || !uuid.endsWith(suffix)) return null;
-    return int.tryParse(uuid.substring(4, 8), radix: 16);
   }
 }
 

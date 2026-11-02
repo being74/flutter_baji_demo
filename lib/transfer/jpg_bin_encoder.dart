@@ -1,17 +1,10 @@
 import 'dart:typed_data';
 
-/// JPEG → 设备 IMB bin 容器编码。
+/// JPEG → 设备 IMB bin 容器。
 ///
-/// 布局以实测可用的厂商样本为准：
-/// ```
-/// 'IMB\0'(4) | 偏移地址(4)=4 | 总长度(4)=文件长-4 | 图像元数据(24) | JPEG 数据
-/// ```
-///
-/// 元数据 24 字节：
-/// ```
-/// format(1)=11 | compress(1)=0 | data_crc(2)=0 | width(2) | height(2)
-/// | offset(4)=36 | len(4)=JPEG 长 | unzipOffset(4)=0 | unzipLen(4)=0
-/// ```
+/// 布局：`'IMB\0'(4) | 偏移(4) | 总长(4) | 元数据(24) | JPEG`，元数据依次为
+/// format(1)、compress(1)、data_crc(2)、width(2)、height(2)、offset(4)、
+/// len(4)、unzipOffset(4)、unzipLen(4)。
 abstract final class JpgBinEncoder {
   static const int magicSize = 4;
   static const int metadataSize = 24;

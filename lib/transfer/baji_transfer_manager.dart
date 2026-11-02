@@ -21,14 +21,14 @@ class TransferCancelled implements Exception {
   const TransferCancelled();
 }
 
-/// 文件传输状态机。
-///
-/// 文档没有定义应用层 ACK，这里只负责按协议节奏发送；失败重试针对单帧写入异常。
-/// 取消通过 [isCancelled] 协作式检查传播。
+/// 文件传输状态机，按协议节奏逐帧发送。
 class BajiTransferManager {
-  BajiTransferManager({required this.sender});
+  BajiTransferManager({required this.sender, this.failureProbe});
 
   final FrameSender sender;
+
+  /// 每帧发送前询问「设备是否已报错」，返回原因则终止传输。
+  final String? Function()? failureProbe;
 
   Future<TransferResult> transfer({
     required TransferKind kind,
@@ -114,6 +114,8 @@ class BajiTransferManager {
 
       while (chunks < totalChunks) {
         if (isCancelled?.call() == true) throw const TransferCancelled();
+        final deviceFailure = failureProbe?.call();
+        if (deviceFailure != null) throw StateError(deviceFailure);
         final payload = rawPayloads != null
             ? rawPayloads[chunks]
             : CommandCodec.fileChunk(

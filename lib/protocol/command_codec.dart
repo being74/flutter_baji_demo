@@ -4,9 +4,7 @@ import 'dart:typed_data';
 import 'baji_protocol.dart';
 import 'device_message.dart';
 
-/// JSON 数据域的构造与解析。
-///
-/// 注意：文档里的 0x01/0x0e 只是十六进制书写习惯，JSON 中必须写十进制。
+/// JSON 数据域的构造与解析。文档里的 0x0d 只是书写习惯，JSON 中必须写十进制。
 abstract final class CommandCodec {
   static const String _hexChars = '0123456789abcdef';
 
@@ -115,7 +113,7 @@ abstract final class CommandCodec {
     return Uint8List.fromList(utf8.encode(buffer.toString()));
   }
 
-  /// 把一份完整文件编码成**一个** JSON（或 RAW_BINARY 原始字节），再按帧数据域上限切片。
+  /// 把整份文件编码成一个数据域，再按帧上限切片。
   static List<Uint8List> filePayloadChunks(
     int type,
     Uint8List bytes, {
@@ -127,10 +125,7 @@ abstract final class CommandCodec {
         maxChunk ?? BajiConfig.maxDataPayload(),
       );
 
-  /// 相册整包：JSON 外壳 + 原始 bin。
-  ///
-  /// 形如 `{"type":6,"data":<raw bin>}`；`data:` 后直接拼接二进制，
-  /// 不是合法 JSON。接收端按帧拼接后去掉头尾即可。
+  /// 相册整包：`{"type":6,"data":<raw bin>}`，data 后直接拼二进制，不是合法 JSON。
   static Uint8List rawFileEnvelope(int type, Uint8List bytes) {
     final prefix = ascii.encode('{"type":$type,"data":');
     final suffix = ascii.encode('}');

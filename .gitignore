@@ -46,3 +46,6 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+
+# Flutter 工具生成物（鸿蒙版工具链仍会生成）
+.flutter-plugins
