@@ -41,8 +41,20 @@ abstract final class MarqueeRenderer {
   static const double _characterMinSize = 220;
   static const double _characterMaxSize = 340;
 
+  /// 文字滚动要在一屏里露出更多字，同滑杆位置的实际字号比单图轮播小一档。
+  static const double _scrollMinSize = 160;
+  static const double _scrollMaxSize = 280;
+
   static List<String> characterFrames(String text) =>
       text.split('').where((character) => character.trim().isNotEmpty).toList();
+
+  /// 指定模式下最终生成的帧数，与 [renderJpegFrames] 的输出保持一致。
+  static int frameCount(String text, MarqueeMode mode) {
+    if (text.trim().isEmpty) return 0;
+    return mode == MarqueeMode.character
+        ? characterFrames(text).length
+        : MarqueeLayout.frameCount;
+  }
 
   static List<double> frameOffsets(MarqueeStyle style) {
     if (style.text.trim().isEmpty) return const [];
@@ -50,13 +62,20 @@ abstract final class MarqueeRenderer {
   }
 
   static double measureText(MarqueeStyle style) =>
-      _buildPainter(style, style.fontSize.toDouble()).width;
+      _buildPainter(style, renderFontSize(style)).width;
 
-  /// 逐字模式：一个字符铺满一帧；字号滑杆映射到 220–340px。
-  static double characterFontSize(MarqueeStyle style) {
-    final progress = (style.fontSize - minFontSize) / (maxFontSize - minFontSize);
-    return _characterMinSize +
-        progress.clamp(0.0, 1.0) * (_characterMaxSize - _characterMinSize);
+  /// 实际渲染字号：滑杆 24–96 在单图轮播映射到 220–340px，
+  /// 文字滚动映射到 160–280px，让滚动时一屏能看到更多字。
+  static double renderFontSize(MarqueeStyle style) {
+    final progress =
+        (style.fontSize - minFontSize) / (maxFontSize - minFontSize);
+    final min = style.mode == MarqueeMode.character
+        ? _characterMinSize
+        : _scrollMinSize;
+    final max = style.mode == MarqueeMode.character
+        ? _characterMaxSize
+        : _scrollMaxSize;
+    return min + progress.clamp(0.0, 1.0) * (max - min);
   }
 
   /// 预览与导出共用：滚动模式的整句帧。
@@ -66,7 +85,7 @@ abstract final class MarqueeRenderer {
       Paint()..color = Color(style.backgroundColor),
     );
     if (style.text.isEmpty) return;
-    final painter = _buildPainter(style, style.fontSize.toDouble());
+    final painter = _buildPainter(style, renderFontSize(style));
     _paintCentered(canvas, painter, offsetX);
   }
 
@@ -109,13 +128,12 @@ abstract final class MarqueeRenderer {
   static TextPainter buildCharacterPainter(
     MarqueeStyle style,
     String character,
-  ) =>
-      _buildPainter(
-        style,
-        characterFontSize(style),
-        center: true,
-        text: character,
-      );
+  ) => _buildPainter(
+    style,
+    renderFontSize(style),
+    center: true,
+    text: character,
+  );
 
   /// 输出 368×368 JPEG（质量 90）帧列表，供动图 bin 封装。
   static Future<List<Uint8List>> renderJpegFrames(
@@ -179,7 +197,8 @@ abstract final class MarqueeRenderer {
       for (var y = 0; y < height; y++) {
         for (var x = 0; x < width; x++) {
           final index = (y * width + x) * 4;
-          final diff = (bytes[index] - bgR).abs() +
+          final diff =
+              (bytes[index] - bgR).abs() +
               (bytes[index + 1] - bgG).abs() +
               (bytes[index + 2] - bgB).abs();
           if (diff < 24) continue;
@@ -201,10 +220,7 @@ abstract final class MarqueeRenderer {
 
   static Future<ui.Image> _drawFrame(void Function(Canvas canvas) draw) async {
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(
-      recorder,
-      const Rect.fromLTWH(0, 0, 368.0, 368.0),
-    );
+    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, 368.0, 368.0));
     draw(canvas);
     final picture = recorder.endRecording();
     try {

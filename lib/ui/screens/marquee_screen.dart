@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../ble/baji_ble_client.dart';
+import '../../transfer/marquee_layout.dart';
 import '../../transfer/marquee_renderer.dart';
 import '../../transfer/transfer_models.dart';
 import '../baji_view_model.dart';
@@ -55,15 +56,19 @@ class MarqueeScreen extends StatefulWidget {
 }
 
 class _MarqueeScreenState extends State<MarqueeScreen> {
-  static const int _defaultIntervalMs = 500;
-  static const double _defaultSpeed =
-      (AnimationLimits.maxIntervalMs - _defaultIntervalMs) /
-          (AnimationLimits.maxIntervalMs - AnimationLimits.minIntervalMs);
+  static const int _characterDefaultIntervalMs = 500;
 
   final TextEditingController _textController = TextEditingController();
-  double _speed = _defaultSpeed;
-  int _fontSize = MarqueeRenderer.defaultFontSize;
+  double _characterSpeed =
+      (AnimationLimits.maxIntervalMs - _characterDefaultIntervalMs) /
+          (AnimationLimits.maxIntervalMs - AnimationLimits.minIntervalMs);
+  double _scrollSpeed =
+      (MarqueeScrollLimits.maxCycleMs - MarqueeScrollLimits.defaultCycleMs) /
+          (MarqueeScrollLimits.maxCycleMs - MarqueeScrollLimits.minCycleMs);
+  int _characterFontSize = MarqueeRenderer.defaultFontSize;
+  int _scrollFontSize = MarqueeRenderer.defaultFontSize;
   int _paletteIndex = 0;
+  MarqueeMode _mode = MarqueeMode.character;
 
   List<Uint8List> _previewFrames = const [];
   int _previewIndex = 0;
@@ -89,7 +94,58 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
     super.dispose();
   }
 
-  int get _intervalMs => animationIntervalFromSpeed(_speed);
+  double get _speed =>
+      _mode == MarqueeMode.character ? _characterSpeed : _scrollSpeed;
+
+  int get _fontSize =>
+      _mode == MarqueeMode.character ? _characterFontSize : _scrollFontSize;
+
+  void _setFontSize(int value) {
+    setState(() {
+      if (_mode == MarqueeMode.character) {
+        _characterFontSize = value;
+      } else {
+        _scrollFontSize = value;
+      }
+    });
+    _schedulePreview();
+  }
+
+  int get _intervalMs => _mode == MarqueeMode.character
+      ? animationIntervalFromSpeed(_characterSpeed)
+      : marqueeScrollIntervalFromSpeed(_scrollSpeed);
+
+  String get _speedLabel {
+    if (_mode == MarqueeMode.character) return '${_intervalMs}ms/字';
+    final seconds =
+        (_intervalMs * MarqueeLayout.frameCount / 1000).toStringAsFixed(1);
+    final trimmed = seconds.endsWith('.0')
+        ? seconds.substring(0, seconds.length - 2)
+        : seconds;
+    return '每轮 $trimmed 秒 · ${_intervalMs}ms/帧';
+  }
+
+  void _setSpeed(double value) {
+    setState(() {
+      if (_mode == MarqueeMode.character) {
+        _characterSpeed = value;
+      } else {
+        _scrollSpeed = value;
+      }
+    });
+    _restartPreviewTimer();
+  }
+
+  MarqueeStyle get _style {
+    final palette = _marqueePalettes[_paletteIndex];
+    return MarqueeStyle(
+      text: _textController.text.trim(),
+      fontSize: _fontSize,
+      textColor: palette.foreground.toARGB32(),
+      backgroundColor: palette.background.toARGB32(),
+      mode: _mode,
+    );
+  }
 
   void _schedulePreview() {
     _previewDebounce?.cancel();
@@ -110,17 +166,17 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
       _restartPreviewTimer();
       return;
     }
+    if (_mode == MarqueeMode.scroll) {
+      if (!mounted || generation != _previewGeneration) return;
+      setState(() {
+        _previewFrames = const [];
+        _previewIndex = 0;
+      });
+      _restartPreviewTimer();
+      return;
+    }
     try {
-      final palette = _marqueePalettes[_paletteIndex];
-      final frames = await MarqueeRenderer.renderJpegFrames(
-        MarqueeStyle(
-          text: content,
-          fontSize: _fontSize,
-          textColor: palette.foreground.value,
-          backgroundColor: palette.background.value,
-          mode: MarqueeMode.character,
-        ),
-      );
+      final frames = await MarqueeRenderer.renderJpegFrames(_style);
       if (!mounted || generation != _previewGeneration) return;
       setState(() {
         _previewFrames = frames;
@@ -134,13 +190,40 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
 
   void _restartPreviewTimer() {
     _previewTimer?.cancel();
-    if (_previewFrames.length <= 1) return;
+    final frameCount = _mode == MarqueeMode.scroll
+        ? MarqueeRenderer.frameCount(_textController.text.trim(), _mode)
+        : _previewFrames.length;
+    if (frameCount <= 1) return;
     _previewTimer = Timer.periodic(Duration(milliseconds: _intervalMs), (_) {
       if (!mounted) return;
       setState(() {
-        _previewIndex = (_previewIndex + 1) % _previewFrames.length;
+        _previewIndex = (_previewIndex + 1) % frameCount;
       });
     });
+  }
+
+  void _selectMode(MarqueeMode mode) {
+    if (_mode == mode) return;
+    setState(() => _mode = mode);
+    _restartPreviewTimer();
+    _schedulePreview();
+  }
+
+  Widget _modeOption(MarqueeMode mode, String label, {required bool enabled}) {
+    void onClick() => _selectMode(mode);
+    return _mode == mode
+        ? FilledPill(
+            text: label,
+            onClick: onClick,
+            enabled: enabled,
+            fullWidth: true,
+          )
+        : OutlinePill(
+            text: label,
+            onClick: onClick,
+            enabled: enabled,
+            fullWidth: true,
+          );
   }
 
   @override
@@ -157,11 +240,19 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
         activeTransfer.running &&
         activeTransfer.totalBytes == 0;
     final busy = transfer.running;
-    final text = _textController.text.trim();
-    final palette = _marqueePalettes[_paletteIndex];
-    final textColor = palette.foreground;
-    final backgroundColor = palette.background;
-    final frameCount = MarqueeRenderer.characterFrames(text).length;
+    final style = _style;
+    final text = style.text;
+    final textColor = style.textColor;
+    final backgroundColor = style.backgroundColor;
+    final frameCount = MarqueeRenderer.frameCount(text, _mode);
+    final renderedFontSize = MarqueeRenderer.renderFontSize(style);
+    final modeDescription = switch (_mode) {
+      MarqueeMode.character => frameCount > 0
+          ? '单图轮播 · 每个字一张 368×368 全屏图，共 $frameCount 帧'
+          : '单图轮播 · 每个字一张 368×368 全屏图',
+      MarqueeMode.scroll =>
+        frameCount > 0 ? '文字滚动 · 整句从右向左滚动，共 $frameCount 帧' : '文字滚动 · 整句从右向左滚动',
+    };
 
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
@@ -180,11 +271,9 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     child: AspectRatio(
                       aspectRatio: 1,
                       child: _MarqueeFramesPreview(
-                        text: text,
+                        style: style,
                         frames: _previewFrames,
                         frameIndex: _previewIndex,
-                        textColor: textColor,
-                        backgroundColor: backgroundColor,
                       ),
                     ),
                   ),
@@ -213,15 +302,34 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                   ),
                   const SizedBox(height: 18),
                   const FormLabel('显示方式'),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _modeOption(
+                          MarqueeMode.character,
+                          '单图轮播',
+                          enabled: !busy,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _modeOption(
+                          MarqueeMode.scroll,
+                          '文字滚动',
+                          enabled: !busy,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      frameCount > 0
-                          ? '逐字轮播 · 每个字一张 368×368 全屏图，共 $frameCount 帧'
-                          : '逐字轮播 · 每个字一张 368×368 全屏图',
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.primary),
+                      modeDescription,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.primary,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 22),
@@ -229,9 +337,10 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     children: [
                       const Expanded(child: FormLabel('字体大小')),
                       Text(
-                        '${_fontSize}px',
-                        style: textTheme.labelLarge
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        '${renderedFontSize.round()}px',
+                        style: textTheme.labelLarge?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -241,21 +350,18 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     max: MarqueeRenderer.maxFontSize.toDouble(),
                     divisions: MarqueeRenderer.maxFontSize -
                         MarqueeRenderer.minFontSize,
-                    onChanged: busy
-                        ? null
-                        : (value) {
-                            setState(() => _fontSize = value.round());
-                            _schedulePreview();
-                          },
+                    onChanged:
+                        busy ? null : (value) => _setFontSize(value.round()),
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
                       const Expanded(child: FormLabel('播放速度')),
                       Text(
-                        '${_intervalMs}ms/帧',
-                        style: textTheme.labelLarge
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        _speedLabel,
+                        style: textTheme.labelLarge?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -265,12 +371,7 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                       Expanded(
                         child: Slider(
                           value: _speed,
-                          onChanged: busy
-                              ? null
-                              : (value) {
-                                  setState(() => _speed = value);
-                                  _restartPreviewTimer();
-                                },
+                          onChanged: busy ? null : _setSpeed,
                           activeColor: scheme.primary,
                           inactiveColor: scheme.surfaceContainerHighest,
                           thumbColor: scheme.surface,
@@ -285,8 +386,9 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       '文字与底色已配好，选一组就行',
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -294,8 +396,9 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       '深色底',
-                      style: textTheme.labelMedium
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -314,8 +417,9 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       '浅色底',
-                      style: textTheme.labelMedium
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -341,9 +445,9 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                     onClick: () => viewModel.startMarqueeTransfer(
                       text: _textController.text,
                       fontSize: _fontSize,
-                      textColor: textColor.value,
-                      backgroundColor: backgroundColor.value,
-                      mode: MarqueeMode.character,
+                      textColor: textColor,
+                      backgroundColor: backgroundColor,
+                      mode: _mode,
                       intervalMs: _intervalMs,
                     ),
                   ),
@@ -362,8 +466,9 @@ class _MarqueeScreenState extends State<MarqueeScreen> {
                   const SizedBox(height: 14),
                   Text(
                     '生成多张 JPG 帧并按动图指令发送，上传可能耗时 1~3 分钟。',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 32),
                 ],
@@ -471,9 +576,8 @@ class _PaletteTile extends StatelessWidget {
                     color: palette.background,
                     borderRadius: BorderRadius.circular(9),
                     border: Border.all(
-                      color: selected
-                          ? Colors.transparent
-                          : scheme.outlineVariant,
+                      color:
+                          selected ? Colors.transparent : scheme.outlineVariant,
                     ),
                   ),
                   child: AspectRatio(
@@ -512,59 +616,91 @@ class _PaletteTile extends StatelessWidget {
 
 class _MarqueeFramesPreview extends StatelessWidget {
   const _MarqueeFramesPreview({
-    required this.text,
+    required this.style,
     required this.frames,
     required this.frameIndex,
-    required this.textColor,
-    required this.backgroundColor,
   });
 
-  final String text;
+  final MarqueeStyle style;
   final List<Uint8List> frames;
   final int frameIndex;
-  final Color textColor;
-  final Color backgroundColor;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasFrame = frames.isNotEmpty;
+    final textColor = Color(style.textColor);
+    final backgroundColor = Color(style.backgroundColor);
+    final Widget content;
+    if (style.text.isEmpty) {
+      content = Center(
+        child: Text(
+          '输入文字后预览',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: textColor.withValues(alpha: 0.55),
+              ),
+        ),
+      );
+    } else if (style.mode == MarqueeMode.scroll) {
+      content = SizedBox.expand(
+        child: CustomPaint(
+          painter: _ScrollFramePainter(style: style, frameIndex: frameIndex),
+        ),
+      );
+    } else if (frames.isEmpty) {
+      content = Center(
+        child: Text(
+          '生成中…',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: textColor.withValues(alpha: 0.55),
+              ),
+        ),
+      );
+    } else {
+      content = SizedBox.expand(
+        child: Image.memory(
+          frames[frameIndex.clamp(0, frames.length - 1)],
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          gaplessPlayback: true,
+        ),
+      );
+    }
     return Container(
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: backgroundColor, shape: BoxShape.circle),
       foregroundDecoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: scheme.outlineVariant, width: 1),
       ),
       clipBehavior: Clip.antiAlias,
-      child: text.isEmpty
-          ? Center(
-              child: Text(
-                '输入文字后预览',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: textColor.withOpacity(0.55),
-                    ),
-              ),
-            )
-          : !hasFrame
-              ? Center(
-                  child: Text(
-                    '生成中…',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: textColor.withOpacity(0.55),
-                        ),
-                  ),
-                )
-              : SizedBox.expand(
-                  child: Image.memory(
-                    frames[frameIndex.clamp(0, frames.length - 1)],
-                    fit: BoxFit.cover,
-                    alignment: Alignment.center,
-                    gaplessPlayback: true,
-                  ),
-                ),
+      child: content,
     );
   }
+}
+
+/// 滚动模式预览直接按帧偏移绘制，避免每敲一个字都编码 30 张 JPEG。
+class _ScrollFramePainter extends CustomPainter {
+  const _ScrollFramePainter({required this.style, required this.frameIndex});
+
+  final MarqueeStyle style;
+  final int frameIndex;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final offsets = MarqueeLayout.offsets(MarqueeRenderer.measureText(style));
+    if (offsets.isEmpty) return;
+    final scale = size.width / MarqueeLayout.size;
+    canvas.save();
+    canvas.scale(scale);
+    MarqueeRenderer.paintFrame(
+      canvas,
+      style,
+      offsets[frameIndex.clamp(0, offsets.length - 1)],
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScrollFramePainter oldDelegate) =>
+      oldDelegate.frameIndex != frameIndex || oldDelegate.style != style;
 }
