@@ -1,8 +1,4 @@
-import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
 
 import '../../ble/baji_ble_client.dart';
 import '../../media/media_files.dart';
@@ -10,6 +6,7 @@ import '../../transfer/transfer_models.dart';
 import '../baji_view_model.dart';
 import '../intervals.dart';
 import '../theme.dart';
+import '../widgets/animation_preview.dart';
 import '../widgets/baji_widgets.dart';
 
 class AnimationScreen extends StatefulWidget {
@@ -91,7 +88,7 @@ class _AnimationScreenState extends State<AnimationScreen> {
               child: Column(
                 children: [
                   const SizedBox(height: 10),
-                  _PreviewCircle(source: source),
+                  _PreviewCircle(source: source, intervalMs: _intervalMs),
                   const SizedBox(height: 18),
                   ConnectionPill(connected: connected),
                   const SizedBox(height: 28),
@@ -137,18 +134,10 @@ class _AnimationScreenState extends State<AnimationScreen> {
                       ),
                     Builder(
                       builder: (context) {
-                        final effective = source.durationMs
-                            .clamp(0, AnimationLimits.maxDurationMs)
-                            .toInt();
-                        final estimated = effective <= 0
-                            ? 1
-                            : (effective ~/ _intervalMs).clamp(
-                                1,
-                                AnimationLimits.maxFrames,
-                              );
+                        final frameCount = source.frames.length;
                         return Text(
-                          '预计 $estimated 帧 · '
-                          '${_formatDuration(estimated * _intervalMs)}',
+                          '$frameCount 帧 · 播放 '
+                          '${_formatDuration(frameCount * _intervalMs)}',
                           style: textTheme.bodySmall
                               ?.copyWith(color: scheme.onSurfaceVariant),
                         );
@@ -234,9 +223,10 @@ class _AnimationScreenState extends State<AnimationScreen> {
 }
 
 class _PreviewCircle extends StatelessWidget {
-  const _PreviewCircle({required this.source});
+  const _PreviewCircle({required this.source, required this.intervalMs});
 
   final AnimationSourceUi? source;
+  final int intervalMs;
 
   @override
   Widget build(BuildContext context) {
@@ -280,138 +270,13 @@ class _PreviewCircle extends StatelessWidget {
                     ],
                   ),
                 )
-              : current.kind == AnimationKind.gif
-                  ? SizedBox.expand(
-                      child: Image.file(
-                        File(current.path),
-                        fit: BoxFit.cover,
-                        alignment: Alignment.center,
-                        gaplessPlayback: true,
-                        errorBuilder: (context, error, stackTrace) =>
-                            _previewError(textTheme, scheme),
-                      ),
-                    )
-                  : SizedBox.expand(
-                      child: _VideoPreview(
-                        key: ValueKey(current.path),
-                        source: current,
-                        loopLimitMs: current.durationMs
-                            .clamp(0, AnimationLimits.maxDurationMs)
-                            .toInt(),
-                      ),
-                    ),
-        ),
-      ),
-    );
-  }
-
-  Widget _previewError(TextTheme textTheme, ColorScheme scheme) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '无法预览',
-              style: textTheme.titleMedium
-                  ?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '请尝试重新选择',
-              style: textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
-class _VideoPreview extends StatefulWidget {
-  const _VideoPreview({super.key, required this.source, required this.loopLimitMs});
-
-  final AnimationSourceUi source;
-  final int loopLimitMs;
-
-  @override
-  State<_VideoPreview> createState() => _VideoPreviewState();
-}
-
-class _VideoPreviewState extends State<_VideoPreview> {
-  VideoPlayerController? _controller;
-  Timer? _loopTimer;
-  bool _failed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _initialize();
-  }
-
-  Future<void> _initialize() async {
-    final controller = VideoPlayerController.file(File(widget.source.path));
-    _controller = controller;
-    try {
-      await controller.initialize();
-      await controller.setVolume(0);
-      await controller.setLooping(true);
-      await controller.play();
-      if (!mounted) return;
-      setState(() {});
-      _loopTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-        if (!controller.value.isInitialized) return;
-        if (widget.loopLimitMs > 0 &&
-            controller.value.position >
-                Duration(milliseconds: widget.loopLimitMs)) {
-          controller.seekTo(Duration.zero);
-        }
-      });
-    } catch (_) {
-      if (mounted) setState(() => _failed = true);
-    }
-  }
-
-  @override
-  void dispose() {
-    _loopTimer?.cancel();
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = _controller;
-    if (_failed) {
-      final preview = widget.source.preview;
-      if (preview != null) {
-        return Image.memory(preview, fit: BoxFit.cover);
-      }
-      return const Center(child: Text('无法预览'));
-    }
-    if (controller == null || !controller.value.isInitialized) {
-      final preview = widget.source.preview;
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          if (preview != null) Image.memory(preview, fit: BoxFit.cover),
-          const Center(
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
-        ],
-      );
-    }
-    final size = controller.value.size;
-    return ClipOval(
-      child: FittedBox(
-        fit: BoxFit.cover,
-        clipBehavior: Clip.hardEdge,
-        child: SizedBox(
-          width: size.width,
-          height: size.height,
-          child: VideoPlayer(controller),
+              : SizedBox.expand(
+                  child: AnimationPreview(
+                    key: ValueKey(current.path),
+                    frames: current.frames,
+                    intervalMs: intervalMs,
+                  ),
+                ),
         ),
       ),
     );

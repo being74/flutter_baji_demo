@@ -10,7 +10,7 @@ void main() {
 
   test('slideshow speed maps to 50ms steps', () {
     expect(slideshowIntervalFromSpeed(1), 200);
-    expect(slideshowIntervalFromSpeed(0), 999);
-    expect(slideshowIntervalFromSpeed(0.5), 600);
+    expect(slideshowIntervalFromSpeed(0), 5000);
+    expect(slideshowIntervalFromSpeed(0.5), 2600);
   });
 }

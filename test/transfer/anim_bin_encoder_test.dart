@@ -84,7 +84,9 @@ void main() {
     expect(utf8.decode(label(50)), 'output/50ms\u0000');
     expect(utf8.decode(label(99)), 'output/99ms\u0000');
     expect(utf8.decode(label(100)), 'output/50ms\u0000');
-    for (var interval = 0; interval <= 999; interval++) {
+    expect(utf8.decode(label(2000)), 'output/50ms\u0000');
+    expect(utf8.decode(label(5000)), 'output/50ms\u0000');
+    for (var interval = 0; interval <= 5000; interval++) {
       expect(label(interval)[11], 0, reason: 'interval=$interval');
     }
   });
@@ -101,16 +103,27 @@ void main() {
     );
   });
 
-  test('interval above 999 is rejected', () {
+  test('interval above 5000 is rejected', () {
     expect(
       () => AnimBinEncoder.encode(
         frames: [Uint8List.fromList([1])],
         width: 1,
         height: 1,
-        intervalMs: 1000,
+        intervalMs: 5001,
       ),
       throwsArgumentError,
     );
+  });
+
+  test('5000ms interval is written to the header', () {
+    final bin = AnimBinEncoder.encode(
+      frames: [Uint8List.fromList([1])],
+      width: 1,
+      height: 1,
+      intervalMs: 5000,
+    );
+
+    expect(readU32(bin, 12), 5000);
   });
 }
 
